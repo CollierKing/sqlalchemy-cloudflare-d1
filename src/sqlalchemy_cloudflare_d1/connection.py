@@ -1,22 +1,308 @@
 """
-Connection implementation for Cloudflare D1 REST API.
+DBAPI implementation for Cloudflare D1 REST API.
 """
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 import httpx
 
 
-class CloudflareD1Connection:
-    """Connection implementation for Cloudflare D1 using REST API."""
+# DBAPI Exception hierarchy
+class Error(Exception):
+    """Base exception for DBAPI errors."""
+
+    pass
+
+
+class Warning(Exception):
+    """Warning exception."""
+
+    pass
+
+
+class InterfaceError(Error):
+    """Error related to the database interface."""
+
+    pass
+
+
+class DatabaseError(Error):
+    """Error related to the database."""
+
+    pass
+
+
+class DataError(DatabaseError):
+    """Error due to problems with the processed data."""
+
+    pass
+
+
+class OperationalError(DatabaseError):
+    """Error related to the database's operation."""
+
+    pass
+
+
+class IntegrityError(DatabaseError):
+    """Error when the relational integrity is affected."""
+
+    pass
+
+
+class InternalError(DatabaseError):
+    """Error when the database encounters an internal error."""
+
+    pass
+
+
+class ProgrammingError(DatabaseError):
+    """Error due to programming error."""
+
+    pass
+
+
+class NotSupportedError(DatabaseError):
+    """Error when a not supported method or API is used."""
+
+    pass
+
+
+class Row:
+    """Row object that behaves like both a tuple and has named access."""
+
+    def __init__(self, data: Dict[str, Any], description: List[tuple]):
+        """Initialize row with data and column descriptions."""
+        self._data = data
+        self._description = description
+        self._keys = (
+            [desc[0] for desc in description] if description else list(data.keys())
+        )
+        self._values = [data.get(key) for key in self._keys]
+
+    def __getitem__(self, key: Union[int, str]) -> Any:
+        """Get item by index or column name."""
+        if isinstance(key, int):
+            return self._values[key]
+        elif isinstance(key, str):
+            return self._data[key]
+        else:
+            raise TypeError("Key must be int or str")
+
+    def __iter__(self):
+        """Iterate over values."""
+        return iter(self._values)
+
+    def __len__(self):
+        """Get number of columns."""
+        return len(self._values)
+
+    def __bool__(self):
+        """Check if row has data."""
+        return bool(self._values)
+
+    def __repr__(self):
+        """String representation of the row."""
+        return f"Row({dict(zip(self._keys, self._values))})"
+
+    def keys(self):
+        """Get column names."""
+        return self._keys
+
+    def values(self):
+        """Get values."""
+        return self._values
+
+    def items(self):
+        """Get (key, value) pairs."""
+        return zip(self._keys, self._values)
+
+    # Add attribute access for compatibility
+    def __getattr__(self, name: str) -> Any:
+        """Allow attribute access to column values."""
+        if name in self._data:
+            return self._data[name]
+        raise AttributeError(f"'Row' object has no attribute '{name}'")
+
+
+class Cursor:
+    """DBAPI-compatible cursor for D1 connections."""
+
+    def __init__(self, connection: "Connection"):
+        """Initialize cursor with connection reference."""
+        self.connection = connection
+        self._result_data = None
+        self._description = None
+        self._rowcount = -1
+        self._arraysize = 1
+        self._closed = False
+        self._position = 0
+        self._last_result_meta = {}
+
+    def execute(
+        self, operation: str, parameters: Optional[Sequence] = None
+    ) -> "Cursor":
+        """Execute a database operation."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        try:
+            result = self.connection._execute_query(operation, parameters)
+            self._result_data = result.get("results", [])
+            self._last_result_meta = result.get("meta", {})
+            self._rowcount = self._last_result_meta.get(
+                "changes", len(self._result_data)
+            )
+
+            # Always set description for SELECT-like statements
+            # Check if this looks like a SELECT statement or any statement that might return rows
+            operation_upper = operation.strip().upper()
+            if (
+                operation_upper.startswith(("SELECT", "PRAGMA", "WITH"))
+                or "RETURNING" in operation_upper
+            ):
+                if self._result_data:
+                    # Build description from first row if available
+                    first_row = self._result_data[0]
+                    self._description = [
+                        (name, None, None, None, None, None, None)
+                        for name in first_row.keys()
+                    ]
+                else:
+                    # Even if no results, we need to indicate this was a SELECT-like query
+                    # We can't know the column names without results, so we'll set an empty description
+                    # that still indicates this is a row-returning statement
+                    self._description = []
+            else:
+                # For non-SELECT statements (INSERT, UPDATE, DELETE, etc.), description should be None
+                self._description = None
+
+            self._position = 0
+            return self
+
+        except Exception as e:
+            raise OperationalError(f"Execute failed: {e}")
+
+    def executemany(
+        self, operation: str, seq_of_parameters: Sequence[Sequence]
+    ) -> "Cursor":
+        """Execute operation multiple times."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        total_rowcount = 0
+        for parameters in seq_of_parameters:
+            self.execute(operation, parameters)
+            if self._rowcount >= 0:
+                total_rowcount += self._rowcount
+
+        self._rowcount = total_rowcount
+        return self
+
+    def fetchone(self) -> Optional[tuple]:
+        """Fetch next row as a tuple."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        if not self._result_data or self._position >= len(self._result_data):
+            return None
+
+        row_data = self._result_data[self._position]
+        self._position += 1
+
+        # Return a tuple of values in the order they appear in the description
+        if self._description:
+            column_names = [desc[0] for desc in self._description]
+            return tuple(row_data.get(name) for name in column_names)
+        else:
+            # If no description, return values in the order they appear in the dict
+            return tuple(row_data.values())
+
+    def fetchmany(self, size: Optional[int] = None) -> List[tuple]:
+        """Fetch multiple rows."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        if size is None:
+            size = self._arraysize
+
+        rows = []
+        for _ in range(size):
+            row = self.fetchone()
+            if row is None:
+                break
+            rows.append(row)
+
+        return rows
+
+    def fetchall(self) -> List[tuple]:
+        """Fetch all remaining rows."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        rows = []
+        while True:
+            row = self.fetchone()
+            if row is None:
+                break
+            rows.append(row)
+
+        return rows
+
+    def close(self) -> None:
+        """Close the cursor."""
+        self._closed = True
+        self._result_data = None
+        self._description = None
+
+    @property
+    def description(self) -> Optional[List[tuple]]:
+        """Get column descriptions.
+
+        Returns:
+            List of 7-tuples (name, type_code, display_size, internal_size,
+            precision, scale, null_ok) for each column, or None for non-SELECT statements.
+        """
+        return self._description
+
+    @property
+    def rowcount(self) -> int:
+        """Get number of affected rows."""
+        return self._rowcount
+
+    @property
+    def arraysize(self) -> int:
+        """Get/set array size for fetchmany."""
+        return self._arraysize
+
+    @arraysize.setter
+    def arraysize(self, size: int) -> None:
+        """Set array size for fetchmany."""
+        self._arraysize = size
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        """Get the ID of the last inserted row."""
+        if hasattr(self, "_last_result_meta"):
+            return self._last_result_meta.get("last_row_id")
+        return None
+
+    def __iter__(self):
+        """Make cursor iterable."""
+        return self
+
+    def __next__(self):
+        """Get next row for iteration."""
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+class Connection:
+    """DBAPI-compatible connection for Cloudflare D1."""
 
     def __init__(self, account_id: str, database_id: str, api_token: str, **kwargs):
-        """Initialize D1 connection.
-
-        Args:
-            account_id: Cloudflare account ID
-            database_id: D1 database ID (UUID)
-            api_token: Cloudflare API token with D1 permissions
-        """
+        """Initialize D1 connection."""
         self.account_id = account_id
         self.database_id = database_id
         self.api_token = api_token
@@ -35,7 +321,12 @@ class CloudflareD1Connection:
 
         # Connection state
         self._closed = False
-        self._in_transaction = False
+
+    def cursor(self) -> Cursor:
+        """Create a cursor."""
+        if self._closed:
+            raise InterfaceError("Connection is closed")
+        return Cursor(self)
 
     def close(self) -> None:
         """Close the connection."""
@@ -43,31 +334,42 @@ class CloudflareD1Connection:
             self.client.close()
             self._closed = True
 
-    @property
-    def closed(self) -> bool:
-        """Check if connection is closed."""
-        return self._closed
+    def commit(self) -> None:
+        """Commit transaction (no-op for D1)."""
+        # D1 auto-commits each query
+        pass
 
-    def execute(
+    def rollback(self) -> None:
+        """Rollback transaction (not supported by D1)."""
+        # D1 doesn't support explicit transactions via REST API
+        pass
+
+    def execute(self, operation: str, parameters: Optional[Sequence] = None):
+        """Execute operation directly on connection (convenience method)."""
+        cursor = self.cursor()
+        cursor.execute(operation, parameters)
+        return cursor
+
+    def _execute_query(
         self, query: str, parameters: Optional[Sequence] = None
-    ) -> "CloudflareD1Result":
-        """Execute a SQL query.
-
-        Args:
-            query: SQL query string
-            parameters: Query parameters for prepared statement
-
-        Returns:
-            CloudflareD1Result: Query result wrapper
-        """
+    ) -> Dict[str, Any]:
+        """Internal method to execute SQL query via D1 REST API."""
         if self._closed:
-            raise RuntimeError("Connection is closed")
+            raise InterfaceError("Connection is closed")
 
         # Prepare the request payload
         payload = {"sql": query}
 
         if parameters:
-            payload["params"] = list(parameters)
+            # Convert parameters to list for D1 API
+            if isinstance(parameters, (tuple, list)):
+                payload["params"] = list(parameters)
+            elif isinstance(parameters, dict):
+                # Handle named parameters by converting to positional
+                # This is a simple implementation - more complex queries might need better handling
+                payload["params"] = list(parameters.values())
+            else:
+                payload["params"] = [parameters]
 
         try:
             # Make the request to D1 REST API
@@ -81,136 +383,68 @@ class CloudflareD1Connection:
                 errors = data.get("errors", [])
                 if errors:
                     error_msg = errors[0].get("message", "Unknown error")
-                    raise RuntimeError(f"D1 API error: {error_msg}")
+                    raise OperationalError(f"D1 API error: {error_msg}")
                 else:
-                    raise RuntimeError("D1 API request failed")
+                    raise OperationalError("D1 API request failed")
 
             # Extract result data
             result_data = data.get("result", [])
             if result_data:
                 query_result = result_data[0]
-                return CloudflareD1Result(
-                    results=query_result.get("results", []),
-                    meta=query_result.get("meta", {}),
-                    success=query_result.get("success", True),
-                )
+                return {
+                    "results": query_result.get("results", []),
+                    "meta": query_result.get("meta", {}),
+                    "success": query_result.get("success", True),
+                }
             else:
-                return CloudflareD1Result(results=[], meta={}, success=True)
+                return {"results": [], "meta": {}, "success": True}
 
         except httpx.RequestError as e:
-            raise RuntimeError(f"HTTP request failed: {e}")
+            raise OperationalError(f"HTTP request failed: {e}")
         except httpx.HTTPStatusError as e:
-            raise RuntimeError(
+            raise OperationalError(
                 f"HTTP error {e.response.status_code}: {e.response.text}"
             )
 
-    def execute_many(
-        self, query: str, parameters_list: List[Sequence]
-    ) -> List["CloudflareD1Result"]:
-        """Execute a query multiple times with different parameters.
-
-        Args:
-            query: SQL query string
-            parameters_list: List of parameter sequences
-
-        Returns:
-            List of CloudflareD1Result objects
-        """
-        results = []
-        for parameters in parameters_list:
-            results.append(self.execute(query, parameters))
-        return results
-
-    def begin_transaction(self) -> None:
-        """Begin a transaction (D1 doesn't support explicit transactions)."""
-        # D1 doesn't support explicit transactions via REST API
-        # Each query is automatically wrapped in a transaction
-        self._in_transaction = True
-
-    def commit_transaction(self) -> None:
-        """Commit a transaction (no-op for D1)."""
-        self._in_transaction = False
-
-    def rollback_transaction(self) -> None:
-        """Rollback a transaction (not supported by D1)."""
-        self._in_transaction = False
-        # D1 doesn't support explicit rollback via REST API
-
-    def get_server_version(self) -> str:
-        """Get D1 server version."""
-        # D1 doesn't expose version info via REST API
-        return "D1-REST-API"
-
-
-class CloudflareD1Result:
-    """Result wrapper for D1 query responses."""
-
-    def __init__(
-        self, results: List[Dict[str, Any]], meta: Dict[str, Any], success: bool = True
-    ):
-        """Initialize result object.
-
-        Args:
-            results: List of result rows as dictionaries
-            meta: Query metadata (duration, rows affected, etc.)
-            success: Whether the query was successful
-        """
-        self.results = results
-        self.meta = meta
-        self.success = success
-        self._index = 0
-
-    def fetchone(self) -> Optional[Dict[str, Any]]:
-        """Fetch the next row."""
-        if self._index < len(self.results):
-            row = self.results[self._index]
-            self._index += 1
-            return row
-        return None
-
-    def fetchmany(self, size: int = None) -> List[Dict[str, Any]]:
-        """Fetch multiple rows."""
-        if size is None:
-            size = len(self.results) - self._index
-
-        start = self._index
-        end = min(start + size, len(self.results))
-        rows = self.results[start:end]
-        self._index = end
-        return rows
-
-    def fetchall(self) -> List[Dict[str, Any]]:
-        """Fetch all remaining rows."""
-        rows = self.results[self._index :]
-        self._index = len(self.results)
-        return rows
-
-    def __iter__(self):
-        """Make result iterable."""
-        return iter(self.results)
-
-    def __getitem__(self, index: int) -> Dict[str, Any]:
-        """Get row by index."""
-        return self.results[index]
-
     @property
-    def rowcount(self) -> int:
-        """Get number of affected rows."""
-        return self.meta.get("changes", len(self.results))
+    def closed(self) -> bool:
+        """Check if connection is closed."""
+        return self._closed
 
-    @property
-    def lastrowid(self) -> Optional[int]:
-        """Get last inserted row ID."""
-        return self.meta.get("last_row_id")
 
-    @property
-    def description(self) -> Optional[List]:
-        """Get column descriptions (not available in D1 REST API)."""
-        # D1 REST API doesn't return column metadata like DBAPI
-        # We could infer from first row if available
-        if self.results:
-            first_row = self.results[0]
-            return [
-                (name, None, None, None, None, None, None) for name in first_row.keys()
-            ]
-        return None
+# DBAPI module interface
+class CloudflareD1DBAPI:
+    """DBAPI module for Cloudflare D1."""
+
+    # DBAPI 2.0 required module attributes
+    apilevel = "2.0"
+    threadsafety = 1
+    paramstyle = "qmark"
+
+    # Exception classes
+    Error = Error
+    Warning = Warning
+    InterfaceError = InterfaceError
+    DatabaseError = DatabaseError
+    DataError = DataError
+    OperationalError = OperationalError
+    IntegrityError = IntegrityError
+    InternalError = InternalError
+    ProgrammingError = ProgrammingError
+    NotSupportedError = NotSupportedError
+
+    @staticmethod
+    def connect(**kwargs) -> Connection:
+        """Create a new database connection."""
+        return Connection(**kwargs)
+
+
+# For backwards compatibility, provide module-level access
+apilevel = CloudflareD1DBAPI.apilevel
+threadsafety = CloudflareD1DBAPI.threadsafety
+paramstyle = CloudflareD1DBAPI.paramstyle
+
+
+def connect(**kwargs) -> Connection:
+    """Create a new database connection."""
+    return CloudflareD1DBAPI.connect(**kwargs)

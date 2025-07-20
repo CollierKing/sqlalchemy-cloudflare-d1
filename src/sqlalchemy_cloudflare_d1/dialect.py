@@ -11,8 +11,9 @@ from sqlalchemy.sql.sqltypes import (
     REAL,
     TEXT,
 )
+from sqlalchemy import text
 
-from .connection import CloudflareD1Connection
+from .connection import CloudflareD1DBAPI
 from .compiler import (
     CloudflareD1Compiler,
     CloudflareD1DDLCompiler,
@@ -48,9 +49,6 @@ class CloudflareD1Dialect(default.DefaultDialect):
     statement_compiler = CloudflareD1Compiler
     ddl_compiler = CloudflareD1DDLCompiler
     type_compiler = CloudflareD1TypeCompiler
-
-    # Connection class
-    connection_cls = CloudflareD1Connection
 
     # Type mapping from SQLAlchemy to D1/SQLite
     colspecs = {
@@ -187,8 +185,8 @@ class CloudflareD1Dialect(default.DefaultDialect):
 
     @classmethod
     def import_dbapi(cls) -> Any:
-        """Import the DBAPI module (not needed for REST API)."""
-        return None
+        """Import the DBAPI module."""
+        return CloudflareD1DBAPI
 
     def create_connect_args(self, url: Any) -> tuple:
         """Extract connection arguments from the URL."""
@@ -216,11 +214,11 @@ class CloudflareD1Dialect(default.DefaultDialect):
         self, connection: Any, schema: Optional[str] = None, **kw: Any
     ) -> List[str]:
         """Get a list of table names."""
-        query = """
+        query = text("""
             SELECT name FROM sqlite_master
             WHERE type='table' AND name NOT LIKE 'sqlite_%'
             ORDER BY name
-        """
+        """)
         result = connection.execute(query)
         return [row[0] for row in result]
 
@@ -228,18 +226,22 @@ class CloudflareD1Dialect(default.DefaultDialect):
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> bool:
         """Check if a table exists."""
-        query = """
+        query = text("""
             SELECT name FROM sqlite_master
-            WHERE type='table' AND name=? AND name NOT LIKE 'sqlite_%'
-        """
-        result = connection.execute(query, (table_name,))
+            WHERE type=:table_type AND name=:table_name AND name NOT LIKE 'sqlite_%'
+        """)
+        result = connection.execute(
+            query, {"table_type": "table", "table_name": table_name}
+        )
         return bool(result.fetchone())
 
     def get_columns(
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get column information for a table."""
-        query = f"PRAGMA table_info({self.identifier_preparer.quote_identifier(table_name)})"
+        query = text(
+            f"PRAGMA table_info({self.identifier_preparer.quote_identifier(table_name)})"
+        )
         result = connection.execute(query)
 
         columns = []
@@ -291,7 +293,9 @@ class CloudflareD1Dialect(default.DefaultDialect):
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get foreign key constraints."""
-        query = f"PRAGMA foreign_key_list({self.identifier_preparer.quote_identifier(table_name)})"
+        query = text(
+            f"PRAGMA foreign_key_list({self.identifier_preparer.quote_identifier(table_name)})"
+        )
         result = connection.execute(query)
 
         # Group foreign keys by constraint
@@ -317,7 +321,9 @@ class CloudflareD1Dialect(default.DefaultDialect):
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get index information."""
-        query = f"PRAGMA index_list({self.identifier_preparer.quote_identifier(table_name)})"
+        query = text(
+            f"PRAGMA index_list({self.identifier_preparer.quote_identifier(table_name)})"
+        )
         result = connection.execute(query)
 
         indexes = []
@@ -328,7 +334,9 @@ class CloudflareD1Dialect(default.DefaultDialect):
                 continue  # Skip auto-generated indexes
 
             # Get column information for this index
-            col_query = f"PRAGMA index_info({self.identifier_preparer.quote_identifier(index_name)})"
+            col_query = text(
+                f"PRAGMA index_info({self.identifier_preparer.quote_identifier(index_name)})"
+            )
             col_result = connection.execute(col_query)
 
             column_names = []
