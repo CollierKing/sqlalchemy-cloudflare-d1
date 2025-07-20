@@ -1,0 +1,80 @@
+[project]
+name = "sqlalchemy-cloudflare-d1"
+version = "0.1.0"
+description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database using the REST API"
+readme = "README.md"
+authors = [
+    { name = "Collier King", email = "collierking99@gmail.com" }
+]
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+keywords = ["sqlalchemy", "cloudflare", "d1", "database", "serverless", "sqlite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "sqlalchemy>=2.0.0",
+    "httpx>=0.24.0",
+    "typing-extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "ruff>=0.0.280",
+]
+
+[project.urls]
+Homepage = "https://github.com/collierking/sqlalchemy-cloudflare-d1"
+Repository = "https://github.com/collierking/sqlalchemy-cloudflare-d1"
+Issues = "https://github.com/collierking/sqlalchemy-cloudflare-d1/issues"
+
+[project.entry-points."sqlalchemy.dialects"]
+cloudflare_d1 = "sqlalchemy_cloudflare_d1.dialect:CloudflareD1Dialect"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
