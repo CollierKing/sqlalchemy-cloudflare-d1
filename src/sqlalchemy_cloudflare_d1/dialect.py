@@ -2,36 +2,27 @@
 SQLAlchemy dialect for Cloudflare D1.
 """
 
-from typing import Any, Dict, List, Optional, Union
-import re
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import pool, util
 from sqlalchemy.engine import default
-from sqlalchemy.sql import compiler
 from sqlalchemy.sql.sqltypes import (
-    BIGINT,
-    BOOLEAN,
-    DATE,
-    DATETIME,
-    DECIMAL,
-    FLOAT,
     INTEGER,
     NUMERIC,
     REAL,
-    SMALLINT,
     TEXT,
-    TIME,
-    TIMESTAMP,
-    VARCHAR,
 )
 
 from .connection import CloudflareD1Connection
-from .compiler import CloudflareD1Compiler, CloudflareD1DDLCompiler, CloudflareD1TypeCompiler
+from .compiler import (
+    CloudflareD1Compiler,
+    CloudflareD1DDLCompiler,
+    CloudflareD1TypeCompiler,
+)
 
 
 class CloudflareD1Dialect(default.DefaultDialect):
     """SQLAlchemy dialect for Cloudflare D1 database."""
-    
+
     name = "cloudflare_d1"
     driver = "httpx"
     supports_alter = False
@@ -46,145 +37,263 @@ class CloudflareD1Dialect(default.DefaultDialect):
     supports_sane_rowcount = True
     supports_sane_multi_rowcount = False
     supports_statement_cache = True
-    
+
     # SQLite/D1 specific capabilities
     supports_cast = True
     supports_multivalues_insert = True
-    
+
     default_paramstyle = "qmark"
-    
+
     # Compiler classes
     statement_compiler = CloudflareD1Compiler
-    ddl_compiler = CloudflareD1DDLCompiler 
+    ddl_compiler = CloudflareD1DDLCompiler
     type_compiler = CloudflareD1TypeCompiler
-    
+
     # Connection class
     connection_cls = CloudflareD1Connection
-    
+
     # Type mapping from SQLAlchemy to D1/SQLite
     colspecs = {
         # Map SQLAlchemy types to D1/SQLite equivalents
     }
-    
+
     # Reserved words (SQLite keywords)
     reserved_words = {
-        "abort", "action", "add", "after", "all", "alter", "analyze", "and",
-        "as", "asc", "attach", "autoincrement", "before", "begin", "between",
-        "by", "cascade", "case", "cast", "check", "collate", "column",
-        "commit", "conflict", "constraint", "create", "cross", "current_date",
-        "current_time", "current_timestamp", "database", "default", "deferrable",
-        "deferred", "delete", "desc", "detach", "distinct", "drop", "each",
-        "else", "end", "escape", "except", "exclusive", "exists", "explain",
-        "fail", "for", "foreign", "from", "full", "glob", "group", "having",
-        "if", "ignore", "immediate", "in", "index", "indexed", "initially",
-        "inner", "insert", "instead", "intersect", "into", "is", "isnull",
-        "join", "key", "left", "like", "limit", "match", "natural", "no",
-        "not", "notnull", "null", "of", "offset", "on", "or", "order",
-        "outer", "plan", "pragma", "primary", "query", "raise", "recursive",
-        "references", "regexp", "reindex", "release", "rename", "replace",
-        "restrict", "right", "rollback", "row", "savepoint", "select", "set",
-        "table", "temp", "temporary", "then", "to", "transaction", "trigger",
-        "union", "unique", "update", "using", "vacuum", "values", "view",
-        "virtual", "when", "where", "with", "without"
+        "abort",
+        "action",
+        "add",
+        "after",
+        "all",
+        "alter",
+        "analyze",
+        "and",
+        "as",
+        "asc",
+        "attach",
+        "autoincrement",
+        "before",
+        "begin",
+        "between",
+        "by",
+        "cascade",
+        "case",
+        "cast",
+        "check",
+        "collate",
+        "column",
+        "commit",
+        "conflict",
+        "constraint",
+        "create",
+        "cross",
+        "current_date",
+        "current_time",
+        "current_timestamp",
+        "database",
+        "default",
+        "deferrable",
+        "deferred",
+        "delete",
+        "desc",
+        "detach",
+        "distinct",
+        "drop",
+        "each",
+        "else",
+        "end",
+        "escape",
+        "except",
+        "exclusive",
+        "exists",
+        "explain",
+        "fail",
+        "for",
+        "foreign",
+        "from",
+        "full",
+        "glob",
+        "group",
+        "having",
+        "if",
+        "ignore",
+        "immediate",
+        "in",
+        "index",
+        "indexed",
+        "initially",
+        "inner",
+        "insert",
+        "instead",
+        "intersect",
+        "into",
+        "is",
+        "isnull",
+        "join",
+        "key",
+        "left",
+        "like",
+        "limit",
+        "match",
+        "natural",
+        "no",
+        "not",
+        "notnull",
+        "null",
+        "of",
+        "offset",
+        "on",
+        "or",
+        "order",
+        "outer",
+        "plan",
+        "pragma",
+        "primary",
+        "query",
+        "raise",
+        "recursive",
+        "references",
+        "regexp",
+        "reindex",
+        "release",
+        "rename",
+        "replace",
+        "restrict",
+        "right",
+        "rollback",
+        "row",
+        "savepoint",
+        "select",
+        "set",
+        "table",
+        "temp",
+        "temporary",
+        "then",
+        "to",
+        "transaction",
+        "trigger",
+        "union",
+        "unique",
+        "update",
+        "using",
+        "vacuum",
+        "values",
+        "view",
+        "virtual",
+        "when",
+        "where",
+        "with",
+        "without",
     }
-    
+
     @classmethod
     def import_dbapi(cls) -> Any:
         """Import the DBAPI module (not needed for REST API)."""
         return None
-    
+
     def create_connect_args(self, url: Any) -> tuple:
         """Extract connection arguments from the URL."""
         opts = {
-            'account_id': url.username,
-            'database_id': url.host,
-            'api_token': url.password,
+            "account_id": url.username,
+            "database_id": url.host,
+            "api_token": url.password,
         }
-        
+
         # Handle additional query parameters
         if url.query:
             opts.update(url.query)
-            
+
         return (), opts
-    
+
     def get_isolation_level(self, connection: Any) -> Optional[str]:
         """D1 doesn't support isolation levels."""
         return None
-    
+
     def set_isolation_level(self, connection: Any, level: Optional[str]) -> None:
         """D1 doesn't support isolation levels."""
         pass
-    
-    def get_table_names(self, connection: Any, schema: Optional[str] = None, **kw: Any) -> List[str]:
+
+    def get_table_names(
+        self, connection: Any, schema: Optional[str] = None, **kw: Any
+    ) -> List[str]:
         """Get a list of table names."""
         query = """
-            SELECT name FROM sqlite_master 
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name NOT LIKE 'sqlite_%'
             ORDER BY name
         """
         result = connection.execute(query)
         return [row[0] for row in result]
-    
-    def has_table(self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any) -> bool:
+
+    def has_table(
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> bool:
         """Check if a table exists."""
         query = """
-            SELECT name FROM sqlite_master 
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name=? AND name NOT LIKE 'sqlite_%'
         """
         result = connection.execute(query, (table_name,))
         return bool(result.fetchone())
-    
-    def get_columns(self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any) -> List[Dict[str, Any]]:
+
+    def get_columns(
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> List[Dict[str, Any]]:
         """Get column information for a table."""
         query = f"PRAGMA table_info({self.identifier_preparer.quote_identifier(table_name)})"
         result = connection.execute(query)
-        
+
         columns = []
         for row in result:
             # SQLite PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-            columns.append({
-                'name': row[1],
-                'type': self._get_column_type(row[2]),
-                'nullable': not bool(row[3]),
-                'default': row[4],
-                'primary_key': bool(row[5])
-            })
-        
+            columns.append(
+                {
+                    "name": row[1],
+                    "type": self._get_column_type(row[2]),
+                    "nullable": not bool(row[3]),
+                    "default": row[4],
+                    "primary_key": bool(row[5]),
+                }
+            )
+
         return columns
-    
+
     def _get_column_type(self, type_string: str) -> Any:
         """Convert SQLite type string to SQLAlchemy type."""
         type_string = type_string.upper()
-        
+
         # Handle common SQLite type mappings
-        if 'INT' in type_string:
+        if "INT" in type_string:
             return INTEGER()
-        elif any(x in type_string for x in ['CHAR', 'CLOB', 'TEXT']):
+        elif any(x in type_string for x in ["CHAR", "CLOB", "TEXT"]):
             return TEXT()
-        elif any(x in type_string for x in ['REAL', 'FLOA', 'DOUB']):
+        elif any(x in type_string for x in ["REAL", "FLOA", "DOUBLE"]):
             return REAL()
-        elif 'BLOB' in type_string:
+        elif "BLOB" in type_string:
             return TEXT()  # D1 doesn't have true BLOB, everything is text-based
-        elif 'NUMERIC' in type_string:
+        elif "NUMERIC" in type_string:
             return NUMERIC()
         else:
             return TEXT()  # Default to TEXT for unknown types
-    
-    def get_pk_constraint(self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any) -> Dict[str, Any]:
+
+    def get_pk_constraint(
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> Dict[str, Any]:
         """Get primary key constraint information."""
         columns = self.get_columns(connection, table_name, schema, **kw)
-        pk_columns = [col['name'] for col in columns if col['primary_key']]
-        
+        pk_columns = [col["name"] for col in columns if col["primary_key"]]
+
         return {
-            'constrained_columns': pk_columns,
-            'name': None  # SQLite doesn't name PK constraints
+            "constrained_columns": pk_columns,
+            "name": None,  # SQLite doesn't name PK constraints
         }
-    
-    def get_foreign_keys(self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any) -> List[Dict[str, Any]]:
+
+    def get_foreign_keys(
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> List[Dict[str, Any]]:
         """Get foreign key constraints."""
         query = f"PRAGMA foreign_key_list({self.identifier_preparer.quote_identifier(table_name)})"
         result = connection.execute(query)
-        
+
         # Group foreign keys by constraint
         fks = {}
         for row in result:
@@ -192,46 +301,47 @@ class CloudflareD1Dialect(default.DefaultDialect):
             fk_id = row[0]
             if fk_id not in fks:
                 fks[fk_id] = {
-                    'name': None,
-                    'constrained_columns': [],
-                    'referred_table': row[2],
-                    'referred_columns': [],
-                    'options': {
-                        'onupdate': row[5],
-                        'ondelete': row[6]
-                    }
+                    "name": None,
+                    "constrained_columns": [],
+                    "referred_table": row[2],
+                    "referred_columns": [],
+                    "options": {"onupdate": row[5], "ondelete": row[6]},
                 }
-            
-            fks[fk_id]['constrained_columns'].append(row[3])
-            fks[fk_id]['referred_columns'].append(row[4])
-        
+
+            fks[fk_id]["constrained_columns"].append(row[3])
+            fks[fk_id]["referred_columns"].append(row[4])
+
         return list(fks.values())
-    
-    def get_indexes(self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any) -> List[Dict[str, Any]]:
+
+    def get_indexes(
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> List[Dict[str, Any]]:
         """Get index information."""
         query = f"PRAGMA index_list({self.identifier_preparer.quote_identifier(table_name)})"
         result = connection.execute(query)
-        
+
         indexes = []
         for row in result:
             # PRAGMA index_list returns: seq, name, unique, origin, partial
             index_name = row[1]
-            if index_name.startswith('sqlite_autoindex_'):
+            if index_name.startswith("sqlite_autoindex_"):
                 continue  # Skip auto-generated indexes
-                
+
             # Get column information for this index
             col_query = f"PRAGMA index_info({self.identifier_preparer.quote_identifier(index_name)})"
             col_result = connection.execute(col_query)
-            
+
             column_names = []
             for col_row in col_result:
                 # PRAGMA index_info returns: seqno, cid, name
                 column_names.append(col_row[2])
-            
-            indexes.append({
-                'name': index_name,
-                'column_names': column_names,
-                'unique': bool(row[2])
-            })
-        
-        return indexes 
+
+            indexes.append(
+                {
+                    "name": index_name,
+                    "column_names": column_names,
+                    "unique": bool(row[2]),
+                }
+            )
+
+        return indexes

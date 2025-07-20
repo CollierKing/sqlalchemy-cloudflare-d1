@@ -79,7 +79,7 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = 'users'
-    
+
     id = Column(Integer, primary_key=True)
     name = Column(String(50))
     email = Column(String(100))
@@ -124,7 +124,7 @@ metadata.create_all(engine)
 with engine.connect() as conn:
     # Insert data
     conn.execute(users.insert().values(name="Bob", email="bob@example.com"))
-    
+
     # Query data
     result = conn.execute(select(users))
     for row in result:
@@ -141,7 +141,7 @@ engine = create_engine("cloudflare_d1://account_id:api_token@database_id")
 with engine.connect() as conn:
     # Execute raw SQL
     result = conn.execute(text("SELECT * FROM sqlite_master WHERE type='table'"))
-    
+
     for row in result:
         print(row)
 ```
@@ -224,40 +224,32 @@ except SQLAlchemyError as e:
 
 ## Development
 
-### Setup Development Environment
+For detailed development instructions, see [`.github/DEVELOPMENT.md`](.github/DEVELOPMENT.md).
+
+### Quick Start
 
 ```bash
 git clone https://github.com/collierking/sqlalchemy-cloudflare-d1.git
 cd sqlalchemy-cloudflare-d1
-uv sync --dev
+
+# Install dependencies and setup pre-commit hooks
+make install
+make setup_hooks
+
+# Run tests and linting
+make check
+
+# Build package
+make build
 ```
 
-### Running Tests
+### Development Tools
 
-```bash
-# Install test dependencies
-uv sync --dev
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=sqlalchemy_cloudflare_d1
-```
-
-### Code Formatting
-
-```bash
-# Format code
-black src tests
-isort src tests
-
-# Lint code
-ruff check src tests
-
-# Type checking
-mypy src
-```
+- **Ruff**: Fast Python linter and formatter
+- **mypy**: Static type checking
+- **codespell**: Spell checking
+- **pre-commit**: Automated pre-commit checks
+- **pytest**: Testing framework with socket control
 
 ## Contributing
 
@@ -282,4 +274,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [GitHub Issues](https://github.com/collierking/sqlalchemy-cloudflare-d1/issues)
 - [Cloudflare D1 Documentation](https://developers.cloudflare.com/d1/)
-- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/) 
+- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
