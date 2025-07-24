@@ -80,4 +80,5 @@ dev = [
     "mypy>=1.17.0",
     "pytest>=8.4.1",
     "pytest-socket>=0.7.0",
+    "ruff>=0.0.280",
 ]
