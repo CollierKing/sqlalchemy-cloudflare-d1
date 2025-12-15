@@ -1,9 +1,19 @@
 """
-DBAPI implementation for Cloudflare D1 REST API.
+DBAPI implementation for Cloudflare D1.
+
+Supports two connection modes:
+1. REST API - for external connections using httpx (account_id, api_token, database_id)
+2. Worker Binding - for use inside Cloudflare Python Workers (d1_binding)
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Union
-import httpx
+
+try:
+    import httpx
+
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
 
 
 # DBAPI Exception hierarchy
@@ -299,10 +309,16 @@ class Cursor:
 
 
 class Connection:
-    """DBAPI-compatible connection for Cloudflare D1."""
+    """DBAPI-compatible connection for Cloudflare D1 REST API."""
 
     def __init__(self, account_id: str, database_id: str, api_token: str, **kwargs):
-        """Initialize D1 connection."""
+        """Initialize D1 connection via REST API."""
+        if not HTTPX_AVAILABLE:
+            raise ImportError(
+                "httpx is required for REST API connections. "
+                "Install with: pip install httpx"
+            )
+
         self.account_id = account_id
         self.database_id = database_id
         self.api_token = api_token
@@ -410,6 +426,292 @@ class Connection:
     def closed(self) -> bool:
         """Check if connection is closed."""
         return self._closed
+
+
+class WorkerConnection:
+    """DBAPI-compatible connection for D1 Worker bindings.
+
+    Use this when running inside a Cloudflare Python Worker where you have
+    direct access to the D1 binding via env.DB.
+
+    Example:
+        from sqlalchemy_cloudflare_d1 import WorkerConnection
+
+        class MyWorker(WorkerEntrypoint):
+            async def fetch(self, request):
+                conn = WorkerConnection(self.env.DB)
+                # Use conn with SQLAlchemy or directly
+    """
+
+    def __init__(self, d1_binding: Any):
+        """Initialize connection with D1 Worker binding.
+
+        Args:
+            d1_binding: The D1 database binding from Worker env (e.g., self.env.DB)
+        """
+        self._d1 = d1_binding
+        self._closed = False
+
+    def cursor(self) -> "WorkerCursor":
+        """Create a cursor."""
+        if self._closed:
+            raise InterfaceError("Connection is closed")
+        return WorkerCursor(self)
+
+    def close(self) -> None:
+        """Close the connection."""
+        self._closed = True
+
+    def commit(self) -> None:
+        """Commit transaction (no-op for D1)."""
+        pass
+
+    def rollback(self) -> None:
+        """Rollback transaction (not supported by D1)."""
+        pass
+
+    def _execute_query_sync(
+        self, query: str, parameters: Optional[Sequence] = None
+    ) -> Dict[str, Any]:
+        """Synchronous query execution - not supported in Workers.
+
+        Raises:
+            NotSupportedError: Always, as Workers require async execution.
+        """
+        raise NotSupportedError(
+            "Synchronous execution not supported in Workers. "
+            "Use async methods or WorkerCursor.execute_async()."
+        )
+
+    def _execute_query(
+        self, query: str, parameters: Optional[Sequence] = None
+    ) -> Dict[str, Any]:
+        """Alias for _execute_query_sync for interface compatibility."""
+        return self._execute_query_sync(query, parameters)
+
+    async def _execute_query_async(
+        self, query: str, parameters: Optional[Sequence] = None
+    ) -> Dict[str, Any]:
+        """Execute SQL query via D1 Worker binding asynchronously."""
+        if self._closed:
+            raise InterfaceError("Connection is closed")
+
+        try:
+            # Prepare the statement
+            stmt = self._d1.prepare(query)
+
+            # Bind parameters if provided
+            if parameters:
+                if isinstance(parameters, (tuple, list)):
+                    stmt = stmt.bind(*parameters)
+                elif isinstance(parameters, dict):
+                    stmt = stmt.bind(*parameters.values())
+                else:
+                    stmt = stmt.bind(parameters)
+
+            # Execute and get results
+            result = await stmt.all()
+
+            # Extract results - D1 binding returns object with results and meta
+            # In Pyodide/Workers, these are JsProxy objects that need .to_py() conversion
+            results = []
+            if hasattr(result, "results") and result.results:
+                # Convert JsProxy to Python list if needed
+                results_data = result.results
+                if hasattr(results_data, "to_py"):
+                    results_data = results_data.to_py()
+
+                # Convert each result row to a dict
+                for row in results_data:
+                    if hasattr(row, "to_py"):
+                        row = row.to_py()
+                    if isinstance(row, dict):
+                        results.append(row)
+                    elif hasattr(row, "__dict__"):
+                        results.append(dict(row.__dict__))
+                    else:
+                        # Try to convert to dict
+                        results.append(dict(row))
+
+            meta = {}
+            if hasattr(result, "meta") and result.meta:
+                meta_data = result.meta
+                if hasattr(meta_data, "to_py"):
+                    meta_data = meta_data.to_py()
+                if isinstance(meta_data, dict):
+                    meta = meta_data
+                elif hasattr(meta_data, "__dict__"):
+                    meta = dict(meta_data.__dict__)
+
+            return {
+                "results": results,
+                "meta": meta,
+                "success": getattr(result, "success", True),
+            }
+
+        except Exception as e:
+            raise OperationalError(f"D1 Worker query failed: {e}")
+
+    @property
+    def closed(self) -> bool:
+        """Check if connection is closed."""
+        return self._closed
+
+    @property
+    def d1(self) -> Any:
+        """Get the underlying D1 binding for direct access."""
+        return self._d1
+
+
+class WorkerCursor:
+    """DBAPI-compatible cursor for D1 Worker bindings."""
+
+    def __init__(self, connection: WorkerConnection):
+        """Initialize cursor with Worker connection reference."""
+        self.connection = connection
+        self._result_data: Optional[List[Dict[str, Any]]] = None
+        self._description: Optional[List[tuple]] = None
+        self._rowcount = -1
+        self._arraysize = 1
+        self._closed = False
+        self._position = 0
+        self._last_result_meta: Dict[str, Any] = {}
+
+    def execute(
+        self, operation: str, parameters: Optional[Sequence] = None
+    ) -> "WorkerCursor":
+        """Synchronous execute - not supported in Workers."""
+        raise NotSupportedError(
+            "Synchronous execute not supported in Workers. Use execute_async() instead."
+        )
+
+    async def execute_async(
+        self, operation: str, parameters: Optional[Sequence] = None
+    ) -> "WorkerCursor":
+        """Execute a database operation asynchronously."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        try:
+            result = await self.connection._execute_query_async(operation, parameters)
+            self._result_data = result.get("results", [])
+            self._last_result_meta = result.get("meta", {})
+            self._rowcount = self._last_result_meta.get(
+                "changes", len(self._result_data) if self._result_data else 0
+            )
+
+            # Set description for SELECT-like statements
+            operation_upper = operation.strip().upper()
+            if (
+                operation_upper.startswith(("SELECT", "PRAGMA", "WITH"))
+                or "RETURNING" in operation_upper
+            ):
+                if self._result_data:
+                    first_row = self._result_data[0]
+                    self._description = [
+                        (name, None, None, None, None, None, None)
+                        for name in first_row.keys()
+                    ]
+                else:
+                    self._description = []
+            else:
+                self._description = None
+
+            self._position = 0
+            return self
+
+        except Exception as e:
+            raise OperationalError(f"Execute failed: {e}")
+
+    def fetchone(self) -> Optional[tuple]:
+        """Fetch next row as a tuple."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        if not self._result_data or self._position >= len(self._result_data):
+            return None
+
+        row_data = self._result_data[self._position]
+        self._position += 1
+
+        if self._description:
+            column_names = [desc[0] for desc in self._description]
+            return tuple(row_data.get(name) for name in column_names)
+        else:
+            return tuple(row_data.values())
+
+    def fetchmany(self, size: Optional[int] = None) -> List[tuple]:
+        """Fetch multiple rows."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        if size is None:
+            size = self._arraysize
+
+        rows = []
+        for _ in range(size):
+            row = self.fetchone()
+            if row is None:
+                break
+            rows.append(row)
+
+        return rows
+
+    def fetchall(self) -> List[tuple]:
+        """Fetch all remaining rows."""
+        if self._closed:
+            raise ProgrammingError("Cursor is closed")
+
+        rows = []
+        while True:
+            row = self.fetchone()
+            if row is None:
+                break
+            rows.append(row)
+
+        return rows
+
+    def close(self) -> None:
+        """Close the cursor."""
+        self._closed = True
+        self._result_data = None
+        self._description = None
+
+    @property
+    def description(self) -> Optional[List[tuple]]:
+        """Get column descriptions."""
+        return self._description
+
+    @property
+    def rowcount(self) -> int:
+        """Get number of affected rows."""
+        return self._rowcount
+
+    @property
+    def arraysize(self) -> int:
+        """Get array size for fetchmany."""
+        return self._arraysize
+
+    @arraysize.setter
+    def arraysize(self, size: int) -> None:
+        """Set array size for fetchmany."""
+        self._arraysize = size
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        """Get the ID of the last inserted row."""
+        return self._last_result_meta.get("last_row_id")
+
+    def __iter__(self):
+        """Make cursor iterable."""
+        return self
+
+    def __next__(self):
+        """Get next row for iteration."""
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
 
 
 # DBAPI module interface

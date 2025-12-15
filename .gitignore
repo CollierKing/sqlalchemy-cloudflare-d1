@@ -208,3 +208,8 @@ __marimo__/
 
 testing/
 *code-workspace
+.claude/
+.venv-workers/
+.wrangler/
+node_modules/
+python_modules/

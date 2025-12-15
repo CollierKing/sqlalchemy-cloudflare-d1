@@ -1,0 +1,26 @@
+[project]
+name = "sqlalchemy-d1-worker"
+version = "0.1.0"
+description = "Example Python Worker using SQLAlchemy with Cloudflare D1"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "webtypy>=0.1.7",
+    "sqlalchemy-cloudflare-d1",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "requests>=2.31.0",
+]
+
+[tool.uv.sources]
+sqlalchemy-cloudflare-d1 = { path = "../.." }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

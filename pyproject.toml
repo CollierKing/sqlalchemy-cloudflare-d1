@@ -1,10 +1,10 @@
 [project]
 name = "sqlalchemy-cloudflare-d1"
-version = "0.1.0"
-description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database using the REST API"
+version = "0.2.0"
+description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database"
 readme = "README.md"
 authors = [
-    { name = "Collier King", email = "collierking99@gmail.com" }
+    { name = "Collier King", url = "https://github.com/CollierKing" }
 ]
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -73,12 +73,16 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+asyncio_mode = "auto"
+addopts = "--ignore=tests/test_worker_integration.py"
 
 [dependency-groups]
 dev = [
     "codespell>=2.4.1",
     "mypy>=1.17.0",
     "pytest>=8.4.1",
+    "pytest-asyncio>=0.21.0",
     "pytest-socket>=0.7.0",
+    "requests>=2.31.0",
     "ruff>=0.0.280",
 ]
