@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.1]
+
+### Added
+
+- `create_engine_from_binding()` function for full SQLAlchemy Core/ORM support inside Cloudflare Python Workers
+- `SyncWorkerConnection` and `SyncWorkerCursor` classes for synchronous DBAPI-compatible interface in Workers
+- `WorkerDBAPI` class providing DBAPI 2.0 module interface for Worker bindings
+- Lazy loading for `CloudflareD1Dialect_async` to avoid requiring greenlet at import time (enables package use in Pyodide/Workers without greenlet)
+
+### Changed
+
+- Moved async dialect import to `__getattr__` for lazy loading, preventing ImportError in environments without greenlet
+
+### Fixed
+
+- D1 binding support now works with SQLAlchemy's `create_engine()` via `pyodide.ffi.run_sync()` for async-to-sync bridging
+
+
 ## [0.3.0]
 
 ### Changed

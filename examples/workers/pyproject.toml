@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "webtypy>=0.1.7",
-    "sqlalchemy-cloudflare-d1",
+    "sqlalchemy-cloudflare-d1>=0.3.1",
 ]
 
 [dependency-groups]
@@ -17,10 +17,6 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "requests>=2.31.0",
 ]
-
-[tool.uv.sources]
-sqlalchemy-cloudflare-d1 = { path = "../.." }
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

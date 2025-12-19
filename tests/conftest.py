@@ -41,27 +41,15 @@ def sync_package_to_python_modules(project_dir: Path) -> None:
 def init_local_database(project_dir: Path) -> None:
     """Initialize the local D1 database with schema and sample data.
 
+    Note: For remote D1 tests, the database should already exist.
+    This function is only needed for local testing.
+
     Args:
         project_dir: Path to the project directory containing db_init.sql
     """
-    result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "pywrangler",
-            "d1",
-            "execute",
-            "example-db",
-            "--local",
-            "--file",
-            "db_init.sql",
-        ],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to initialize database: {result.stderr}")
+    # Skip local DB init if we're using remote D1
+    # The wrangler.jsonc has remote: true configured
+    pass
 
 
 def find_free_port() -> int:
@@ -86,7 +74,8 @@ def pywrangler_dev_server(
     """
     port = find_free_port()
 
-    # Start the dev server with --local flag for local D1 database
+    # Start the dev server with --local flag
+    # Note: --remote has issues with Python Workers on Cloudflare edge
     process = subprocess.Popen(
         ["uv", "run", "pywrangler", "dev", "--local", "--port", str(port)],
         cwd=project_dir,
@@ -139,22 +128,16 @@ def initialized_worker():
     return True
 
 
-@pytest.fixture
-def dev_server(request, initialized_worker):
-    """Fixture that starts a pywrangler dev server for the test.
+@pytest.fixture(scope="session")
+def dev_server(initialized_worker):
+    """Session-scoped fixture that starts a single pywrangler dev server.
 
-    The server is automatically stopped after the test completes.
+    The server is reused across all Worker tests and stopped after the session.
     Depends on initialized_worker to ensure Worker environment is set up first.
 
     Yields:
         int: The port number the server is running on
     """
-    # Skip server startup for skipped/xfail tests
-    markers = list(request.node.iter_markers())
-    marker_names = [m.name for m in markers]
-    if "skip" in marker_names or "xfail" in marker_names:
-        pytest.skip("Skipping server startup for marked test")
-
     project_dir = get_worker_project_dir()
 
     process = None
