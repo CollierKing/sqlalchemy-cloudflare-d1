@@ -1,6 +1,6 @@
 [project]
 name = "sqlalchemy-cloudflare-d1"
-version = "0.3.0"
+version = "0.3.1"
 description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database"
 readme = "README.md"
 authors = [
@@ -29,6 +29,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+async = [
+    "greenlet>=3.2.3",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -45,6 +48,7 @@ Issues = "https://github.com/collierking/sqlalchemy-cloudflare-d1/issues"
 
 [project.entry-points."sqlalchemy.dialects"]
 cloudflare_d1 = "sqlalchemy_cloudflare_d1.dialect:CloudflareD1Dialect"
+"cloudflare_d1.async" = "sqlalchemy_cloudflare_d1.dialect_async:CloudflareD1Dialect_async"
 
 [build-system]
 requires = ["hatchling"]
@@ -74,7 +78,7 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 asyncio_mode = "auto"
-addopts = "--ignore=tests/test_worker_integration.py"
+addopts = "--ignore=tests/integration"
 
 [dependency-groups]
 dev = [

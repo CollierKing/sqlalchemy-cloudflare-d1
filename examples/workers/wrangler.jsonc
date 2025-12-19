@@ -6,8 +6,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "example-db",
-      "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+      "database_name": "test-db",
+      "database_id": "4f7d22a8-de65-41a2-9643-d04fb71f718f",
+      "remote": true
     }
   ],
   "observability": {

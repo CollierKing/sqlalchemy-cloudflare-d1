@@ -133,7 +133,7 @@ def test_create_table_no_duplicate_primary_key():
     dialect = CloudflareD1Dialect()
     metadata = MetaData()
 
-    # Define a table with TEXT primary key (like langchain-cloudflare uses)
+    # Define a table with TEXT primary key
     test_table = Table(
         "test_table",
         metadata,
@@ -174,6 +174,64 @@ def test_create_table_no_autoincrement_on_text():
 
     # Should NOT contain AUTOINCREMENT
     assert "AUTOINCREMENT" not in sql.upper(), f"Unexpected AUTOINCREMENT in: {sql}"
+
+
+def test_async_dialect_import():
+    """Test that the async dialect can be imported."""
+    from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect_async
+
+    assert CloudflareD1Dialect_async is not None
+
+
+def test_async_dialect_instantiation():
+    """Test that the async dialect can be instantiated."""
+    from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect_async
+
+    dialect = CloudflareD1Dialect_async()
+    assert dialect.name == "cloudflare_d1"
+    assert dialect.driver == "async"
+    assert dialect.is_async is True
+
+
+def test_async_dialect_inherits_from_sync():
+    """Test that the async dialect inherits from the sync dialect."""
+    from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect, CloudflareD1Dialect_async
+
+    assert issubclass(CloudflareD1Dialect_async, CloudflareD1Dialect)
+
+
+def test_async_connection_classes():
+    """Test that async connection classes can be imported."""
+    from sqlalchemy_cloudflare_d1 import AsyncConnection, AsyncCursor, connect_async
+
+    assert AsyncConnection is not None
+    assert AsyncCursor is not None
+    assert connect_async is not None
+
+
+def test_async_dialect_url_parsing():
+    """Test that the async dialect can parse connection URLs."""
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect_async
+
+    url = make_url("cloudflare_d1+async://test_account:test_token@test_database_id")
+    dialect = CloudflareD1Dialect_async()
+
+    args, kwargs = dialect.create_connect_args(url)
+    assert kwargs["account_id"] == "test_account"
+    assert kwargs["api_token"] == "test_token"
+    assert kwargs["database_id"] == "test_database_id"
+
+
+def test_async_dbapi_module():
+    """Test that the async DBAPI module has required attributes."""
+    from sqlalchemy_cloudflare_d1.dialect_async import AsyncAdapt_d1_dbapi
+
+    assert AsyncAdapt_d1_dbapi.apilevel == "2.0"
+    assert AsyncAdapt_d1_dbapi.threadsafety == 1
+    assert AsyncAdapt_d1_dbapi.paramstyle == "qmark"
+    assert hasattr(AsyncAdapt_d1_dbapi, "Error")
+    assert hasattr(AsyncAdapt_d1_dbapi, "connect")
 
 
 if __name__ == "__main__":
