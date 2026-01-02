@@ -1035,17 +1035,31 @@ class SyncWorkerConnection:
             from pyodide.ffi import run_sync
 
             async def _run():
+                from js import JSON
+
+                # Get a proper JS null value (not undefined)
+                JS_NULL = JSON.parse("null")
+
+                def convert_param(val):
+                    """Convert parameter for D1 binding, handling None -> null."""
+                    if val is None:
+                        return JS_NULL
+                    return val
+
                 # Prepare the statement
                 stmt = self._d1.prepare(query)
 
                 # Bind parameters if provided
+                # Note: Python None must be converted to JS null via to_js()
                 if parameters:
                     if isinstance(parameters, (tuple, list)):
-                        stmt = stmt.bind(*parameters)
+                        converted = [convert_param(p) for p in parameters]
+                        stmt = stmt.bind(*converted)
                     elif isinstance(parameters, dict):
-                        stmt = stmt.bind(*parameters.values())
+                        converted = [convert_param(v) for v in parameters.values()]
+                        stmt = stmt.bind(*converted)
                     else:
-                        stmt = stmt.bind(parameters)
+                        stmt = stmt.bind(convert_param(parameters))
 
                 # MARK: - Execute using raw({columnNames: true}) for reliable column metadata
                 # This returns column names even on empty results

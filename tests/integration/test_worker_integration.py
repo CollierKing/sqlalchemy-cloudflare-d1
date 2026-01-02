@@ -461,3 +461,99 @@ class TestJsonColumnFilteringAdditional:
         assert "Widget A" in data["matching_products"]
         assert "Widget B" in data["matching_products"]
         assert "Widget C" in data["matching_products"]
+
+
+# MARK: - Boolean Column Tests
+
+
+class TestBooleanColumn:
+    """Test boolean column handling (fixes GitHub issue #6).
+
+    D1 stores booleans as TEXT strings ("true"/"false").
+    The D1Boolean type processor converts these back to Python booleans.
+    """
+
+    def test_boolean_column_returns_python_bool(self, dev_server):
+        """Test that boolean columns return Python bool, not str or int."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/boolean-column")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "boolean_column"
+        assert data["success"] is True
+
+        # Check types - should be actual booleans
+        assert data["admin_is_admin"] is True
+        assert data["admin_is_active"] is True
+        assert data["user_is_admin"] is False
+        assert data["user_is_active"] is True
+        assert data["inactive_is_admin"] is False
+        assert data["inactive_is_active"] is False
+
+    def test_boolean_filter_with_python_bool(self, dev_server):
+        """Test filtering by boolean values works correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/boolean-filter")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "boolean_filter"
+        assert data["success"] is True
+        assert len(data["enabled_features"]) == 2
+        assert "Feature A" in data["enabled_features"]
+        assert "Feature C" in data["enabled_features"]
+        assert len(data["disabled_features"]) == 1
+        assert "Feature B" in data["disabled_features"]
+
+    def test_boolean_nullable_column(self, dev_server):
+        """Test nullable boolean columns handle NULL correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/boolean-nullable")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "boolean_nullable"
+        assert data["success"] is True
+        assert data["user_a_verified"] is True
+        assert data["user_b_verified"] is False
+        assert data["user_c_verified"] is None  # NULL
+
+
+# MARK: - NULL Parameter Handling Tests
+
+
+class TestNullParameterHandling:
+    """Test NULL parameter handling in Worker binding.
+
+    Python None must be converted to JS null (not undefined) for D1.
+    """
+
+    def test_insert_null_string(self, dev_server):
+        """Test inserting NULL into a String column."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/null-string")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "null_string"
+        assert data["success"] is True
+        assert data["row_with_value"] == "hello"
+        assert data["row_with_null"] is None
+
+    def test_insert_null_integer(self, dev_server):
+        """Test inserting NULL into an Integer column."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/null-integer")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "null_integer"
+        assert data["success"] is True
+        assert data["row_with_value"] == 42
+        assert data["row_with_null"] is None

@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     MetaData,
@@ -1715,6 +1716,229 @@ class TestJsonColumnFiltering:
             assert src_counts["linkedin"] == 1
             assert src_counts["reddit"] == 1
             assert src_counts["twitter"] == 1
+
+        finally:
+            metadata.drop_all(d1_engine)
+
+
+# MARK: - Boolean Column Tests
+
+
+class TestBooleanColumn:
+    """Test boolean column handling (fixes GitHub issue #6).
+
+    D1/SQLite stores booleans as integers (0/1) or strings ("true"/"false").
+    The D1Boolean type processor converts these back to Python booleans.
+    """
+
+    def test_boolean_column_returns_python_bool(self, d1_engine, test_table_name):
+        """Test that boolean columns return Python bool, not str or int."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("username", String(100)),
+            Column("is_admin", Boolean),
+            Column("is_active", Boolean),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert users with boolean values
+                conn.execute(
+                    test_table.insert().values(
+                        username="admin", is_admin=True, is_active=True
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        username="user", is_admin=False, is_active=True
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        username="inactive", is_admin=False, is_active=False
+                    )
+                )
+                conn.commit()
+
+                # Query and verify types
+                result = conn.execute(
+                    select(
+                        test_table.c.username,
+                        test_table.c.is_admin,
+                        test_table.c.is_active,
+                    ).order_by(test_table.c.username)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 3
+
+            # Check admin user
+            assert rows[0][0] == "admin"
+            assert rows[0][1] is True
+            assert rows[0][2] is True
+            assert isinstance(rows[0][1], bool)
+            assert isinstance(rows[0][2], bool)
+
+            # Check inactive user
+            assert rows[1][0] == "inactive"
+            assert rows[1][1] is False
+            assert rows[1][2] is False
+            assert isinstance(rows[1][1], bool)
+            assert isinstance(rows[1][2], bool)
+
+            # Check regular user
+            assert rows[2][0] == "user"
+            assert rows[2][1] is False
+            assert rows[2][2] is True
+            assert isinstance(rows[2][1], bool)
+            assert isinstance(rows[2][2], bool)
+
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_boolean_filter_with_python_bool(self, d1_engine, test_table_name):
+        """Test filtering by boolean values works correctly."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("enabled", Boolean),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="Feature A", enabled=True))
+                conn.execute(
+                    test_table.insert().values(name="Feature B", enabled=False)
+                )
+                conn.execute(test_table.insert().values(name="Feature C", enabled=True))
+                conn.commit()
+
+                # Filter for enabled=True
+                result = conn.execute(
+                    select(test_table.c.name)
+                    .where(test_table.c.enabled == True)  # noqa: E712
+                    .order_by(test_table.c.name)
+                )
+                enabled_rows = result.fetchall()
+
+                # Filter for enabled=False
+                result = conn.execute(
+                    select(test_table.c.name).where(
+                        test_table.c.enabled == False  # noqa: E712
+                    )
+                )
+                disabled_rows = result.fetchall()
+
+            assert len(enabled_rows) == 2
+            assert enabled_rows[0][0] == "Feature A"
+            assert enabled_rows[1][0] == "Feature C"
+
+            assert len(disabled_rows) == 1
+            assert disabled_rows[0][0] == "Feature B"
+
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_boolean_nullable_column(self, d1_engine, test_table_name):
+        """Test nullable boolean columns handle NULL correctly."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("verified", Boolean, nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="User A", verified=True))
+                conn.execute(test_table.insert().values(name="User B", verified=False))
+                conn.execute(
+                    test_table.insert().values(name="User C", verified=None)
+                )  # NULL
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.name, test_table.c.verified).order_by(
+                        test_table.c.name
+                    )
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 3
+
+            # User A - verified=True
+            assert rows[0][0] == "User A"
+            assert rows[0][1] is True
+            assert isinstance(rows[0][1], bool)
+
+            # User B - verified=False
+            assert rows[1][0] == "User B"
+            assert rows[1][1] is False
+            assert isinstance(rows[1][1], bool)
+
+            # User C - verified=NULL
+            assert rows[2][0] == "User C"
+            assert rows[2][1] is None
+
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_boolean_update(self, d1_engine, test_table_name):
+        """Test updating boolean values works correctly."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("active", Boolean),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert with active=True
+                conn.execute(test_table.insert().values(name="Test", active=True))
+                conn.commit()
+
+                # Verify initial value
+                result = conn.execute(
+                    select(test_table.c.active).where(test_table.c.name == "Test")
+                )
+                row = result.fetchone()
+                assert row[0] is True
+                assert isinstance(row[0], bool)
+
+                # Update to active=False
+                conn.execute(
+                    test_table.update()
+                    .where(test_table.c.name == "Test")
+                    .values(active=False)
+                )
+                conn.commit()
+
+                # Verify updated value
+                result = conn.execute(
+                    select(test_table.c.active).where(test_table.c.name == "Test")
+                )
+                row = result.fetchone()
+                assert row[0] is False
+                assert isinstance(row[0], bool)
 
         finally:
             metadata.drop_all(d1_engine)

@@ -82,6 +82,18 @@ class Default(WorkerEntrypoint):
         # Additional JSON tests
         elif path == "json-multiple-values":
             return await self.test_json_multiple_values()
+        # Boolean column tests
+        elif path == "boolean-column":
+            return await self.test_boolean_column()
+        elif path == "boolean-filter":
+            return await self.test_boolean_filter()
+        elif path == "boolean-nullable":
+            return await self.test_boolean_nullable()
+        # NULL parameter tests
+        elif path == "null-string":
+            return await self.test_null_string()
+        elif path == "null-integer":
+            return await self.test_null_integer()
         else:
             return await self.index()
 
@@ -119,6 +131,11 @@ class Default(WorkerEntrypoint):
                 "/sqlalchemy-get-tables": "Test dialect get_table_names()",
                 "/empty-result-where": "Test empty result with WHERE clause",
                 "/json-multiple-values": "Test JSON filter with multiple values",
+                "/boolean-column": "Test boolean column returns Python bool",
+                "/boolean-filter": "Test filtering by boolean values",
+                "/boolean-nullable": "Test nullable boolean columns",
+                "/null-string": "Test NULL parameter with String column",
+                "/null-integer": "Test NULL parameter with Integer column",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -1694,5 +1711,336 @@ class Default(WorkerEntrypoint):
                 pass
             return Response.json(
                 {"test": "json_multiple_values", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - Boolean Column Tests
+
+    async def test_boolean_column(self):
+        """Test that boolean columns return Python bool, not str or int."""
+        from sqlalchemy import MetaData, Table, Column, Integer, String, Boolean, select
+
+        table_name = f"test_bool_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("username", String(100)),
+                Column("is_admin", Boolean),
+                Column("is_active", Boolean),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        username="admin", is_admin=True, is_active=True
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        username="user", is_admin=False, is_active=True
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        username="inactive", is_admin=False, is_active=False
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(
+                        test_table.c.username,
+                        test_table.c.is_admin,
+                        test_table.c.is_active,
+                    ).order_by(test_table.c.username)
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            # Verify booleans are actual Python bools
+            success = (
+                len(rows) == 3
+                and rows[0][1] is True  # admin.is_admin
+                and rows[0][2] is True  # admin.is_active
+                and rows[1][1] is False  # inactive.is_admin
+                and rows[1][2] is False  # inactive.is_active
+                and rows[2][1] is False  # user.is_admin
+                and rows[2][2] is True  # user.is_active
+            )
+
+            return Response.json(
+                {
+                    "test": "boolean_column",
+                    "success": success,
+                    "admin_is_admin": rows[0][1],
+                    "admin_is_active": rows[0][2],
+                    "inactive_is_admin": rows[1][1],
+                    "inactive_is_active": rows[1][2],
+                    "user_is_admin": rows[2][1],
+                    "user_is_active": rows[2][2],
+                }
+            )
+        except Exception as e:
+            try:
+                engine = self.get_engine()
+                metadata = MetaData()
+                test_table = Table(table_name, metadata)
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "boolean_column", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_boolean_filter(self):
+        """Test filtering by boolean values works correctly."""
+        from sqlalchemy import MetaData, Table, Column, Integer, String, Boolean, select
+
+        table_name = f"test_bool_filter_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100)),
+                Column("enabled", Boolean),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="Feature A", enabled=True))
+                conn.execute(
+                    test_table.insert().values(name="Feature B", enabled=False)
+                )
+                conn.execute(test_table.insert().values(name="Feature C", enabled=True))
+                conn.commit()
+
+                # Filter for enabled=True
+                result = conn.execute(
+                    select(test_table.c.name)
+                    .where(test_table.c.enabled == True)  # noqa: E712
+                    .order_by(test_table.c.name)
+                )
+                enabled_rows = result.fetchall()
+
+                # Filter for enabled=False
+                result = conn.execute(
+                    select(test_table.c.name).where(
+                        test_table.c.enabled == False  # noqa: E712
+                    )
+                )
+                disabled_rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = (
+                len(enabled_rows) == 2
+                and enabled_rows[0][0] == "Feature A"
+                and enabled_rows[1][0] == "Feature C"
+                and len(disabled_rows) == 1
+                and disabled_rows[0][0] == "Feature B"
+            )
+
+            return Response.json(
+                {
+                    "test": "boolean_filter",
+                    "success": success,
+                    "enabled_features": [row[0] for row in enabled_rows],
+                    "disabled_features": [row[0] for row in disabled_rows],
+                }
+            )
+        except Exception as e:
+            try:
+                engine = self.get_engine()
+                metadata = MetaData()
+                test_table = Table(table_name, metadata)
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "boolean_filter", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_boolean_nullable(self):
+        """Test nullable boolean columns handle NULL correctly."""
+        from sqlalchemy import MetaData, Table, Column, Integer, String, Boolean, select
+
+        table_name = f"test_bool_null_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100)),
+                Column("verified", Boolean, nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="User A", verified=True))
+                conn.execute(test_table.insert().values(name="User B", verified=False))
+                conn.execute(test_table.insert().values(name="User C", verified=None))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.name, test_table.c.verified).order_by(
+                        test_table.c.name
+                    )
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = (
+                len(rows) == 3
+                and rows[0][1] is True  # User A
+                and rows[1][1] is False  # User B
+                and rows[2][1] is None  # User C (NULL)
+            )
+
+            return Response.json(
+                {
+                    "test": "boolean_nullable",
+                    "success": success,
+                    "user_a_verified": rows[0][1],
+                    "user_b_verified": rows[1][1],
+                    "user_c_verified": rows[2][1],
+                }
+            )
+        except Exception as e:
+            try:
+                engine = self.get_engine()
+                metadata = MetaData()
+                test_table = Table(table_name, metadata)
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "boolean_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - NULL Parameter Tests
+
+    async def test_null_string(self):
+        """Test inserting NULL into a String column."""
+        from sqlalchemy import MetaData, Table, Column, Integer, String, select
+
+        table_name = f"test_null_str_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("value", String(100), nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(value="hello"))
+                conn.execute(test_table.insert().values(value=None))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.value).order_by(test_table.c.id)
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 2 and rows[0][0] == "hello" and rows[1][0] is None
+
+            return Response.json(
+                {
+                    "test": "null_string",
+                    "success": success,
+                    "row_with_value": rows[0][0],
+                    "row_with_null": rows[1][0],
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "null_string", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_null_integer(self):
+        """Test inserting NULL into an Integer column."""
+        from sqlalchemy import MetaData, Table, Column, Integer, select
+
+        table_name = f"test_null_int_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("value", Integer, nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(value=42))
+                conn.execute(test_table.insert().values(value=None))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.value).order_by(test_table.c.id)
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 2 and rows[0][0] == 42 and rows[1][0] is None
+
+            return Response.json(
+                {
+                    "test": "null_integer",
+                    "success": success,
+                    "row_with_value": rows[0][0],
+                    "row_with_null": rows[1][0],
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "null_integer", "success": False, "error": str(e)},
                 status=500,
             )
