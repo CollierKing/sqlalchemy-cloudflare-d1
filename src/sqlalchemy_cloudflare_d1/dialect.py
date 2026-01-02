@@ -2,10 +2,12 @@
 SQLAlchemy dialect for Cloudflare D1.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.engine import default
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.sql.sqltypes import (
+    Boolean,
     INTEGER,
     NUMERIC,
     REAL,
@@ -19,6 +21,51 @@ from .compiler import (
     CloudflareD1DDLCompiler,
     CloudflareD1TypeCompiler,
 )
+
+
+# MARK: - Custom Type Processors
+
+
+class D1Boolean(Boolean):
+    """Custom Boolean type for Cloudflare D1.
+
+    D1's API converts Python bools to strings. We use bind_processor to
+    send integers (1/0) instead, so comparisons like `WHERE col = 1` work.
+    The result_processor handles both string and integer responses.
+    """
+
+    def bind_processor(
+        self, dialect: Dialect
+    ) -> Callable[[Optional[bool]], Optional[int]]:
+        """Convert Python bool to integer for D1."""
+
+        def process(value: Optional[bool]) -> Optional[int]:
+            if value is None:
+                return None
+            return 1 if value else 0
+
+        return process
+
+    def result_processor(
+        self, dialect: Dialect, coltype: Any
+    ) -> Callable[[Any], Optional[bool]]:
+        """Convert D1 boolean values to Python bool."""
+
+        def process(value: Any) -> Optional[bool]:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, int):
+                return bool(value)
+            if isinstance(value, str):
+                return value.lower() == "true"
+            return bool(value)
+
+        return process
+
+
+# MARK: - Dialect
 
 
 class CloudflareD1Dialect(default.DefaultDialect):
@@ -52,7 +99,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
 
     # Type mapping from SQLAlchemy to D1/SQLite
     colspecs = {
-        # Map SQLAlchemy types to D1/SQLite equivalents
+        Boolean: D1Boolean,
     }
 
     # Reserved words (SQLite keywords)

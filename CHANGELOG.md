@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.3]
+
+### Fixed
+
+- Fixed Boolean columns returning strings instead of Python `bool` ([#6](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/6))
+  - D1's API was converting Python booleans to strings (`"true"`/`"false"`) which broke filtering
+  - Added `D1Boolean` type class with `bind_processor` (converts `True`/`False` to `1`/`0`) and `result_processor` (converts responses back to Python `bool`)
+  - Boolean column filtering (`WHERE is_admin = True`) now works correctly
+- Fixed NULL parameter handling in Python Workers
+  - Python `None` was being converted to JavaScript `undefined` instead of `null`
+  - D1 rejected `undefined` values with `D1_TYPE_ERROR`
+  - Now uses `JSON.parse("null")` to get proper JavaScript `null` value
+
+
 ## [0.3.2]
 
 ### Fixed
