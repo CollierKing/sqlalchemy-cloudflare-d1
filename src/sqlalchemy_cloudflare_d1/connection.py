@@ -688,6 +688,18 @@ class CloudflareD1DBAPI:
         """Create a new database connection."""
         return Connection(**kwargs)
 
+    @staticmethod
+    def Binary(data: bytes) -> bytes:
+        """Return binary data for binding to BLOB columns.
+
+        Args:
+            data: Raw bytes to bind
+
+        Returns:
+            The same bytes (D1 REST API handles base64 encoding internally)
+        """
+        return data
+
 
 # For backwards compatibility, provide module-level access
 apilevel = CloudflareD1DBAPI.apilevel
@@ -982,6 +994,18 @@ class WorkerDBAPI:
     def connect(self, **kwargs) -> "SyncWorkerConnection":
         """Create a new database connection using the stored D1 binding."""
         return SyncWorkerConnection(self._d1_binding)
+
+    @staticmethod
+    def Binary(data: bytes) -> bytes:
+        """Return binary data for binding to BLOB columns.
+
+        Args:
+            data: Raw bytes to bind
+
+        Returns:
+            The same bytes (Worker binding handles encoding internally)
+        """
+        return data
 
 
 class SyncWorkerConnection:

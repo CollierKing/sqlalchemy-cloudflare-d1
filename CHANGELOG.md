@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.4]
+
+### Added
+
+- LargeBinary column type support ([#8](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/8))
+  - Added `Binary()` method to DBAPI classes for SQLAlchemy compatibility
+  - Added `D1LargeBinary` type processor for automatic base64 decoding on retrieval
+  - BLOB columns now properly compile as BLOB (not TEXT) and reflect as LargeBinary
+  - Binary data can now be stored and retrieved correctly in both REST API and Worker modes
+
+### Enhanced
+
+- Additional test coverage for ON CONFLICT clauses ([#9](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/9))
+  - Added tests for ON CONFLICT DO NOTHING
+  - Added tests for composite unique constraints
+  - Added tests for conditional updates with WHERE clause
+  - Note: ON CONFLICT support was added in v0.3.0, now with comprehensive test coverage
+
+
 ## [0.3.3]
 
 ### Fixed

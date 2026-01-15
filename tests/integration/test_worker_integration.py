@@ -557,3 +557,99 @@ class TestNullParameterHandling:
         assert data["success"] is True
         assert data["row_with_value"] == 42
         assert data["row_with_null"] is None
+
+
+# MARK: - LargeBinary Column Tests
+
+
+class TestLargeBinaryColumn:
+    """Test LargeBinary column handling in Workers (fixes GitHub issue #8).
+
+    D1 stores binary data as BLOB. The D1LargeBinary type processor handles
+    base64 decoding when reading data back from D1.
+    """
+
+    def test_largebinary_column_stores_and_retrieves(self, dev_server):
+        """Test that LargeBinary columns work in Workers."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/largebinary-basic")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "largebinary_basic"
+        assert data["success"] is True
+        assert data["data_matches"] is True
+
+    def test_largebinary_with_image_data(self, dev_server):
+        """Test storing simulated image data in Workers."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/largebinary-image")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "largebinary_image"
+        assert data["success"] is True
+        assert data["has_png_header"] is True
+
+    def test_largebinary_nullable(self, dev_server):
+        """Test nullable LargeBinary columns in Workers."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/largebinary-nullable")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "largebinary_nullable"
+        assert data["success"] is True
+        assert data["null_is_none"] is True
+        assert data["data_is_bytes"] is True
+
+
+# MARK: - ON CONFLICT Advanced Tests
+
+
+class TestOnConflictAdvanced:
+    """Test advanced ON CONFLICT clause variations (GitHub issue #9).
+
+    Note: Basic ON CONFLICT support was added in v0.3.0. These tests cover
+    additional edge cases and usage patterns.
+    """
+
+    def test_on_conflict_do_nothing(self, dev_server):
+        """Test INSERT ... ON CONFLICT DO NOTHING."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/on-conflict-do-nothing")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "on_conflict_do_nothing"
+        assert data["success"] is True
+        assert data["row_count"] == 1
+        assert data["original_value_preserved"] is True
+
+    def test_on_conflict_composite_key(self, dev_server):
+        """Test ON CONFLICT with composite unique constraint."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/on-conflict-composite")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "on_conflict_composite"
+        assert data["success"] is True
+        assert data["value_updated"] is True
+
+    def test_on_conflict_with_where(self, dev_server):
+        """Test ON CONFLICT with WHERE clause."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/on-conflict-where")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "on_conflict_where"
+        assert data["success"] is True
+        assert data["is_verified"] is True

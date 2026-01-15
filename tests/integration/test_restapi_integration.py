@@ -19,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -1940,6 +1941,316 @@ class TestBooleanColumn:
                 assert row[0] is False
                 assert isinstance(row[0], bool)
 
+        finally:
+            metadata.drop_all(d1_engine)
+
+
+# MARK: - LargeBinary Column Tests
+
+
+class TestLargeBinaryColumn:
+    """Test LargeBinary column handling (fixes GitHub issue #8).
+
+    D1 stores binary data as BLOB. The D1LargeBinary type processor handles
+    base64 decoding when reading data back from D1.
+    """
+
+    def test_largebinary_column_stores_and_retrieves(self, d1_engine, test_table_name):
+        """Test that LargeBinary columns can store and retrieve binary data."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("data", LargeBinary),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert binary data
+                binary_data = b"\x00\x01\x02\x03\xff\xfe\xfd"
+                conn.execute(
+                    test_table.insert().values(name="test_file", data=binary_data)
+                )
+                conn.commit()
+
+                # Retrieve and verify
+                result = conn.execute(
+                    select(test_table).where(test_table.c.name == "test_file")
+                )
+                row = result.fetchone()
+
+                assert row is not None
+                assert isinstance(row[2], bytes)
+                assert row[2] == binary_data
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_largebinary_with_image_data(self, d1_engine, test_table_name):
+        """Test storing simulated image data (PNG header)."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("filename", String(100)),
+            Column("image_data", LargeBinary),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Simulate PNG header + some data
+                png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+
+                conn.execute(
+                    test_table.insert().values(filename="test.png", image_data=png_data)
+                )
+                conn.commit()
+
+                # Retrieve
+                result = conn.execute(
+                    select(test_table).where(test_table.c.filename == "test.png")
+                )
+                row = result.fetchone()
+
+                assert row is not None
+                assert row[2] == png_data
+                assert row[2][:8] == b"\x89PNG\r\n\x1a\n"
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_largebinary_nullable(self, d1_engine, test_table_name):
+        """Test nullable LargeBinary columns handle NULL correctly."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("data", LargeBinary, nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert with NULL
+                conn.execute(test_table.insert().values(name="no_data", data=None))
+                # Insert with data
+                conn.execute(
+                    test_table.insert().values(name="has_data", data=b"\xab\xcd")
+                )
+                conn.commit()
+
+                # Verify
+                result = conn.execute(select(test_table).order_by(test_table.c.id))
+                rows = result.fetchall()
+
+                assert len(rows) == 2
+                assert rows[0][2] is None
+                assert rows[1][2] == b"\xab\xcd"
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_largebinary_large_payload(self, d1_engine, test_table_name):
+        """Test storing larger binary payloads."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("blob_data", LargeBinary),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Create a larger binary payload (10KB of random-ish data)
+                large_data = bytes(range(256)) * 40  # 10,240 bytes
+
+                conn.execute(
+                    test_table.insert().values(name="large_blob", blob_data=large_data)
+                )
+                conn.commit()
+
+                # Retrieve and verify
+                result = conn.execute(
+                    select(test_table).where(test_table.c.name == "large_blob")
+                )
+                row = result.fetchone()
+
+                assert row is not None
+                assert isinstance(row[2], bytes)
+                assert len(row[2]) == 10240
+                assert row[2] == large_data
+        finally:
+            metadata.drop_all(d1_engine)
+
+
+# MARK: - ON CONFLICT Advanced Tests
+
+
+class TestOnConflictAdvanced:
+    """Test advanced ON CONFLICT clause variations (GitHub issue #9).
+
+    Note: Basic ON CONFLICT support was added in v0.3.0. These tests cover
+    additional edge cases and usage patterns.
+    """
+
+    def test_on_conflict_do_nothing(self, d1_engine, test_table_name):
+        """Test INSERT ... ON CONFLICT DO NOTHING."""
+        metadata = MetaData()
+
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100), unique=True),
+            Column("count", Integer),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # First insert
+                stmt = sqlite_insert(test_table).values(
+                    id=1, name="unique_name", count=10
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                # Try to insert duplicate - should do nothing
+                stmt = sqlite_insert(test_table).values(
+                    id=2, name="unique_name", count=20
+                )
+                stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
+                conn.execute(stmt)
+                conn.commit()
+
+                # Verify only first row exists with original values
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+
+                assert len(rows) == 1
+                assert rows[0][0] == 1  # id
+                assert rows[0][1] == "unique_name"
+                assert rows[0][2] == 10  # count unchanged
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_on_conflict_composite_key(self, d1_engine, test_table_name):
+        """Test ON CONFLICT with composite unique constraint."""
+        from sqlalchemy import UniqueConstraint
+
+        metadata = MetaData()
+
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("user_id", Integer),
+            Column("resource_id", Integer),
+            Column("access_level", String(50)),
+            Column("granted_at", String(50)),
+            UniqueConstraint("user_id", "resource_id", name="unique_user_resource"),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert permission
+                stmt = sqlite_insert(test_table).values(
+                    user_id=1,
+                    resource_id=100,
+                    access_level="read",
+                    granted_at="2024-01-01",
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                # Update permission with upsert
+                stmt = sqlite_insert(test_table).values(
+                    user_id=1,
+                    resource_id=100,
+                    access_level="write",
+                    granted_at="2024-01-02",
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["user_id", "resource_id"],
+                    set_={
+                        "access_level": stmt.excluded.access_level,
+                        "granted_at": stmt.excluded.granted_at,
+                    },
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                # Verify update
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+
+                assert len(rows) == 1
+                assert rows[0][2] == "write"  # access_level updated
+                assert rows[0][3] == "2024-01-02"  # granted_at updated
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_on_conflict_with_where_clause(self, d1_engine, test_table_name):
+        """Test ON CONFLICT with WHERE clause (conditional update)."""
+        metadata = MetaData()
+
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("email", String(100), unique=True),
+            Column("is_verified", Boolean),
+            Column("updated_at", String(50)),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert unverified email
+                stmt = sqlite_insert(test_table).values(
+                    email="test@example.com", is_verified=False, updated_at="2024-01-01"
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                # Upsert with WHERE clause - only update if not verified
+                stmt = sqlite_insert(test_table).values(
+                    email="test@example.com", is_verified=True, updated_at="2024-01-02"
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["email"],
+                    set_={
+                        "is_verified": stmt.excluded.is_verified,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                    where=(test_table.c.is_verified == False),  # noqa: E712
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                # Verify update happened
+                result = conn.execute(
+                    select(test_table).where(test_table.c.email == "test@example.com")
+                )
+                row = result.fetchone()
+
+                assert row is not None
+                assert row[2] is True  # is_verified
+                assert row[3] == "2024-01-02"
         finally:
             metadata.drop_all(d1_engine)
 

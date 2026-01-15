@@ -94,6 +94,20 @@ class Default(WorkerEntrypoint):
             return await self.test_null_string()
         elif path == "null-integer":
             return await self.test_null_integer()
+        # LargeBinary column tests
+        elif path == "largebinary-basic":
+            return await self.test_largebinary_basic()
+        elif path == "largebinary-image":
+            return await self.test_largebinary_image()
+        elif path == "largebinary-nullable":
+            return await self.test_largebinary_nullable()
+        # ON CONFLICT advanced tests
+        elif path == "on-conflict-do-nothing":
+            return await self.test_on_conflict_do_nothing()
+        elif path == "on-conflict-composite":
+            return await self.test_on_conflict_composite()
+        elif path == "on-conflict-where":
+            return await self.test_on_conflict_where()
         else:
             return await self.index()
 
@@ -136,6 +150,12 @@ class Default(WorkerEntrypoint):
                 "/boolean-nullable": "Test nullable boolean columns",
                 "/null-string": "Test NULL parameter with String column",
                 "/null-integer": "Test NULL parameter with Integer column",
+                "/largebinary-basic": "Test LargeBinary column basic usage",
+                "/largebinary-image": "Test LargeBinary with image data",
+                "/largebinary-nullable": "Test nullable LargeBinary columns",
+                "/on-conflict-do-nothing": "Test ON CONFLICT DO NOTHING",
+                "/on-conflict-composite": "Test ON CONFLICT with composite key",
+                "/on-conflict-where": "Test ON CONFLICT with WHERE clause",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -2042,5 +2062,390 @@ class Default(WorkerEntrypoint):
                 pass
             return Response.json(
                 {"test": "null_integer", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - LargeBinary Column Tests
+
+    async def test_largebinary_basic(self):
+        """Test basic LargeBinary column functionality."""
+        from sqlalchemy import (
+            Column,
+            Integer,
+            LargeBinary,
+            MetaData,
+            String,
+            Table,
+            select,
+        )
+
+        table_name = f"test_largebinary_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100)),
+                Column("data", LargeBinary),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                binary_data = b"\x00\x01\x02\x03\xff\xfe\xfd"
+                conn.execute(
+                    test_table.insert().values(name="test_file", data=binary_data)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table).where(test_table.c.name == "test_file")
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = row is not None and row[2] == binary_data
+
+            return Response.json(
+                {
+                    "test": "largebinary_basic",
+                    "success": success,
+                    "data_matches": row[2] == binary_data if row else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "largebinary_basic", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_largebinary_image(self):
+        """Test storing simulated image data."""
+        from sqlalchemy import (
+            Column,
+            Integer,
+            LargeBinary,
+            MetaData,
+            String,
+            Table,
+            select,
+        )
+
+        table_name = f"test_largebinary_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("filename", String(100)),
+                Column("image_data", LargeBinary),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+                conn.execute(
+                    test_table.insert().values(filename="test.png", image_data=png_data)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table).where(test_table.c.filename == "test.png")
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = row is not None and row[2] == png_data
+            has_png_header = row[2][:8] == b"\x89PNG\r\n\x1a\n" if row else False
+
+            return Response.json(
+                {
+                    "test": "largebinary_image",
+                    "success": success,
+                    "has_png_header": has_png_header,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "largebinary_image", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_largebinary_nullable(self):
+        """Test nullable LargeBinary columns."""
+        from sqlalchemy import (
+            Column,
+            Integer,
+            LargeBinary,
+            MetaData,
+            String,
+            Table,
+            select,
+        )
+
+        table_name = f"test_largebinary_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100)),
+                Column("data", LargeBinary, nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="no_data", data=None))
+                conn.execute(
+                    test_table.insert().values(name="has_data", data=b"\xab\xcd")
+                )
+                conn.commit()
+
+                result = conn.execute(select(test_table).order_by(test_table.c.id))
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 2
+            null_is_none = rows[0][2] is None if len(rows) > 0 else False
+            data_is_bytes = rows[1][2] == b"\xab\xcd" if len(rows) > 1 else False
+
+            return Response.json(
+                {
+                    "test": "largebinary_nullable",
+                    "success": success,
+                    "null_is_none": null_is_none,
+                    "data_is_bytes": data_is_bytes,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "largebinary_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - ON CONFLICT Advanced Tests
+
+    async def test_on_conflict_do_nothing(self):
+        """Test INSERT ... ON CONFLICT DO NOTHING."""
+        from sqlalchemy import Column, Integer, MetaData, String, Table, select
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        table_name = f"test_conflict_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100), unique=True),
+                Column("count", Integer),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                stmt = sqlite_insert(test_table).values(
+                    id=1, name="unique_name", count=10
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                stmt = sqlite_insert(test_table).values(
+                    id=2, name="unique_name", count=20
+                )
+                stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
+                conn.execute(stmt)
+                conn.commit()
+
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 1
+            original_preserved = rows[0][2] == 10 if rows else False
+
+            return Response.json(
+                {
+                    "test": "on_conflict_do_nothing",
+                    "success": success,
+                    "row_count": len(rows),
+                    "original_value_preserved": original_preserved,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "on_conflict_do_nothing", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_on_conflict_composite(self):
+        """Test ON CONFLICT with composite unique constraint."""
+        from sqlalchemy import (
+            Column,
+            Integer,
+            MetaData,
+            String,
+            Table,
+            UniqueConstraint,
+            select,
+        )
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        table_name = f"test_conflict_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("user_id", Integer),
+                Column("resource_id", Integer),
+                Column("access_level", String(50)),
+                UniqueConstraint("user_id", "resource_id", name="unique_user_resource"),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                stmt = sqlite_insert(test_table).values(
+                    user_id=1, resource_id=100, access_level="read"
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                stmt = sqlite_insert(test_table).values(
+                    user_id=1, resource_id=100, access_level="write"
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["user_id", "resource_id"],
+                    set_={"access_level": stmt.excluded.access_level},
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 1
+            value_updated = rows[0][2] == "write" if rows else False
+
+            return Response.json(
+                {
+                    "test": "on_conflict_composite",
+                    "success": success,
+                    "value_updated": value_updated,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "on_conflict_composite", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_on_conflict_where(self):
+        """Test ON CONFLICT with WHERE clause."""
+        from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, select
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        table_name = f"test_conflict_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("email", String(100), unique=True),
+                Column("is_verified", Boolean),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                stmt = sqlite_insert(test_table).values(
+                    email="test@example.com", is_verified=False
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                stmt = sqlite_insert(test_table).values(
+                    email="test@example.com", is_verified=True
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["email"],
+                    set_={"is_verified": stmt.excluded.is_verified},
+                    where=(test_table.c.is_verified == False),  # noqa: E712
+                )
+                conn.execute(stmt)
+                conn.commit()
+
+                result = conn.execute(select(test_table))
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = row is not None and row[2] is True
+
+            return Response.json(
+                {
+                    "test": "on_conflict_where",
+                    "success": success,
+                    "is_verified": row[2] if row else None,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "on_conflict_where", "success": False, "error": str(e)},
                 status=500,
             )

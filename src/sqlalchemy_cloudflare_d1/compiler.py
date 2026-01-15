@@ -324,7 +324,7 @@ class CloudflareD1TypeCompiler(SQLiteTypeCompiler):
 
     def visit_BLOB(self, type_, **kw):
         """Handle BLOB type."""
-        return "TEXT"  # D1 doesn't support true BLOB, use TEXT
+        return "BLOB"
 
     def visit_CLOB(self, type_, **kw):
         """Handle CLOB type."""

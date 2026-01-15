@@ -280,6 +280,18 @@ class AsyncAdapt_d1_dbapi:
         # only its methods need awaiting)
         return AsyncAdapt_d1_connection(self, async_conn)
 
+    @staticmethod
+    def Binary(data: bytes) -> bytes:
+        """Return binary data for binding to BLOB columns.
+
+        Args:
+            data: Raw bytes to bind
+
+        Returns:
+            The same bytes (D1 REST API handles base64 encoding internally)
+        """
+        return data
+
 
 # Module-level singleton for the DBAPI
 _dbapi_singleton = None

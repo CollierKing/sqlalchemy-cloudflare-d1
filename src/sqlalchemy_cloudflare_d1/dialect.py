@@ -2,6 +2,7 @@
 SQLAlchemy dialect for Cloudflare D1.
 """
 
+import base64
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.engine import default
@@ -9,6 +10,7 @@ from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.sql.sqltypes import (
     Boolean,
     INTEGER,
+    LargeBinary,
     NUMERIC,
     REAL,
     TEXT,
@@ -65,6 +67,49 @@ class D1Boolean(Boolean):
         return process
 
 
+class D1LargeBinary(LargeBinary):
+    """Custom LargeBinary type for Cloudflare D1.
+
+    D1 stores BLOB data, but the REST API requires base64-encoded strings for
+    binary data transfer. This type processor handles:
+    - bind_processor: Encodes bytes to base64 strings before sending to D1
+    - result_processor: Decodes base64 strings back to bytes when reading from D1
+    """
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Any], Optional[str]]:
+        """Convert bytes to base64 strings before sending to D1."""
+
+        def process(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, bytes):
+                return base64.b64encode(value).decode("ascii")
+            return value
+
+        return process
+
+    def result_processor(
+        self, dialect: Dialect, coltype: Any
+    ) -> Callable[[Any], Optional[bytes]]:
+        """Convert base64 strings back to bytes when reading from D1."""
+
+        def process(value: Any) -> Optional[bytes]:
+            if value is None:
+                return None
+            if isinstance(value, bytes):
+                return value
+            if isinstance(value, str):
+                # D1 returns binary data as base64-encoded strings
+                try:
+                    return base64.b64decode(value)
+                except Exception:
+                    # If not valid base64, return as encoded bytes
+                    return value.encode("utf-8")
+            return value
+
+        return process
+
+
 # MARK: - Dialect
 
 
@@ -100,6 +145,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
     # Type mapping from SQLAlchemy to D1/SQLite
     colspecs = {
         Boolean: D1Boolean,
+        LargeBinary: D1LargeBinary,
     }
 
     # Reserved words (SQLite keywords)
@@ -318,7 +364,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
         elif any(x in type_string for x in ["REAL", "FLOA", "DOUBLE"]):
             return REAL()
         elif "BLOB" in type_string:
-            return TEXT()  # D1 doesn't have true BLOB, everything is text-based
+            return LargeBinary()
         elif "NUMERIC" in type_string:
             return NUMERIC()
         else:
