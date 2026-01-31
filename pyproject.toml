@@ -1,6 +1,6 @@
 [project]
 name = "sqlalchemy-cloudflare-d1"
-version = "0.3.4"
+version = "0.3.5"
 description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database"
 readme = "README.md"
 authors = [

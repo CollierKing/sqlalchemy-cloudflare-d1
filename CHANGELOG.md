@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.5]
+
+### Fixed
+
+- Fixed single-row query results being lost in `cursor.description` for WorkerConnection
+  - When a query returned exactly 1 row via the D1 Worker binding, `fetchall()` returned `[]` and `cursor.description` contained data values instead of column names
+  - Root cause: D1's `raw({columnNames: true})` inconsistently omits the column names header for single-row results in remote deployments
+  - Switched Worker binding from `raw()` to `all()` API which returns structured objects with named keys, eliminating fragile header-row parsing
+  - Empty SELECT results still correctly populate `cursor.description` via a guarded `raw()` fallback
+
+
 ## [0.3.4]
 
 ### Added
