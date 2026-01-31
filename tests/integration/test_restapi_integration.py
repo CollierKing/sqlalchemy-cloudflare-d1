@@ -2255,5 +2255,101 @@ class TestOnConflictAdvanced:
             metadata.drop_all(d1_engine)
 
 
+# MARK: - Single-Row Result Tests
+
+
+class TestSingleRowResult:
+    """Test that single-row query results are returned correctly.
+
+    Regression tests for bug where single-row results end up in
+    cursor.description instead of being returned by fetchall().
+    """
+
+    def test_single_row_via_cursor(self, d1_connection):
+        """Test single-row SELECT returns the row via DBAPI cursor."""
+        cursor = d1_connection.cursor()
+        table_name = f"test_single_{__import__('uuid').uuid4().hex[:8]}"
+
+        try:
+            cursor.execute(
+                f"CREATE TABLE IF NOT EXISTS {table_name} "
+                f"(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER)"
+            )
+            cursor.execute(
+                f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                ("only_row", 99),
+            )
+
+            cursor.execute(f"SELECT id, name, value FROM {table_name}")
+            description = cursor.description
+            rows = cursor.fetchall()
+
+            # Description should have column names
+            desc_names = [d[0] for d in description] if description else []
+            assert desc_names == ["id", "name", "value"]
+
+            # fetchall should return the single row
+            assert len(rows) == 1
+            assert rows[0][1] == "only_row"
+            assert rows[0][2] == 99
+        finally:
+            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+    def test_single_row_via_sqlalchemy(self, d1_engine, test_table_name):
+        """Test single-row result via SQLAlchemy engine."""
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100)),
+            Column("value", Integer),
+        )
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="only_row", value=99))
+                conn.commit()
+
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+                columns = list(result.keys())
+
+            assert len(rows) == 1
+            assert rows[0][1] == "only_row"
+            assert rows[0][2] == 99
+            assert columns == ["id", "name", "value"]
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_multi_row_description_has_column_names(self, d1_connection):
+        """Test multi-row SELECT has correct column names in description."""
+        cursor = d1_connection.cursor()
+        table_name = f"test_multi_{__import__('uuid').uuid4().hex[:8]}"
+
+        try:
+            cursor.execute(
+                f"CREATE TABLE IF NOT EXISTS {table_name} "
+                f"(id INTEGER PRIMARY KEY, name TEXT NOT NULL, value INTEGER)"
+            )
+            for name, val in [("row_one", 10), ("row_two", 20), ("row_three", 30)]:
+                cursor.execute(
+                    f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                    (name, val),
+                )
+
+            cursor.execute(f"SELECT id, name, value FROM {table_name} ORDER BY id")
+            description = cursor.description
+            rows = cursor.fetchall()
+
+            desc_names = [d[0] for d in description] if description else []
+            assert desc_names == ["id", "name", "value"]
+            assert len(rows) == 3
+            assert rows[0][1] == "row_one"
+        finally:
+            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

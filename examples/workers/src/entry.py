@@ -108,6 +108,13 @@ class Default(WorkerEntrypoint):
             return await self.test_on_conflict_composite()
         elif path == "on-conflict-where":
             return await self.test_on_conflict_where()
+        # Single-row result tests (bug: single-row results lost in description)
+        elif path == "single-row-result":
+            return await self.test_single_row_result()
+        elif path == "single-row-sqlalchemy":
+            return await self.test_single_row_sqlalchemy()
+        elif path == "multi-row-result":
+            return await self.test_multi_row_result()
         else:
             return await self.index()
 
@@ -156,6 +163,9 @@ class Default(WorkerEntrypoint):
                 "/on-conflict-do-nothing": "Test ON CONFLICT DO NOTHING",
                 "/on-conflict-composite": "Test ON CONFLICT with composite key",
                 "/on-conflict-where": "Test ON CONFLICT with WHERE clause",
+                "/single-row-result": "Test single-row SELECT returns data correctly",
+                "/single-row-sqlalchemy": "Test single-row via SQLAlchemy engine",
+                "/multi-row-result": "Test multi-row SELECT returns correct data",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -2384,6 +2394,199 @@ class Default(WorkerEntrypoint):
                 pass
             return Response.json(
                 {"test": "on_conflict_composite", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - Single-Row Result Tests
+
+    async def test_single_row_result(self):
+        """Test that a single-row SELECT returns data in fetchall, not description."""
+        table_name = f"test_single_{uuid.uuid4().hex[:8]}"
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # Create table and insert exactly 1 row
+            await cursor.execute_async(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    value INTEGER
+                )
+            """)
+            await cursor.execute_async(
+                f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                ("only_row", 99),
+            )
+
+            # SELECT the single row
+            await cursor.execute_async(f"SELECT id, name, value FROM {table_name}")
+            description = cursor.description
+            rows = cursor.fetchall()
+            rowcount = cursor.rowcount
+
+            # Clean up
+            await cursor.execute_async(f"DROP TABLE IF EXISTS {table_name}")
+            conn.close()
+
+            # Verify: description should have column names, not data values
+            desc_names = [d[0] for d in description] if description else []
+            expected_columns = ["id", "name", "value"]
+
+            success = (
+                len(rows) == 1
+                and rows[0][1] == "only_row"
+                and rows[0][2] == 99
+                and desc_names == expected_columns
+            )
+
+            return Response.json(
+                {
+                    "test": "single_row_result",
+                    "success": success,
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "rowcount": rowcount,
+                    "description_names": desc_names,
+                    "expected_columns": expected_columns,
+                }
+            )
+        except Exception as e:
+            try:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                await cursor.execute_async(f"DROP TABLE IF EXISTS {table_name}")
+                conn.close()
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "single_row_result", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_single_row_sqlalchemy(self):
+        """Test single-row result via SQLAlchemy engine."""
+        from sqlalchemy import Column, Integer, MetaData, String, Table, select
+
+        table_name = f"test_single_sa_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("name", String(100)),
+                Column("value", Integer),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(name="only_row", value=99))
+                conn.commit()
+
+                result = conn.execute(select(test_table))
+                rows = result.fetchall()
+                columns = list(result.keys())
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 1 and rows[0][1] == "only_row" and rows[0][2] == 99
+
+            return Response.json(
+                {
+                    "test": "single_row_sqlalchemy",
+                    "success": success,
+                    "rows": [list(row) for row in rows],
+                    "columns": columns,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "single_row_sqlalchemy", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_multi_row_result(self):
+        """Test that multi-row SELECT returns correct data and description."""
+        table_name = f"test_multi_{uuid.uuid4().hex[:8]}"
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            await cursor.execute_async(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    value INTEGER
+                )
+            """)
+            await cursor.execute_async(
+                f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                ("row_one", 10),
+            )
+            await cursor.execute_async(
+                f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                ("row_two", 20),
+            )
+            await cursor.execute_async(
+                f"INSERT INTO {table_name} (name, value) VALUES (?, ?)",
+                ("row_three", 30),
+            )
+
+            # SELECT all rows
+            await cursor.execute_async(
+                f"SELECT id, name, value FROM {table_name} ORDER BY id"
+            )
+            description = cursor.description
+            rows = cursor.fetchall()
+            rowcount = cursor.rowcount
+
+            # Clean up
+            await cursor.execute_async(f"DROP TABLE IF EXISTS {table_name}")
+            conn.close()
+
+            desc_names = [d[0] for d in description] if description else []
+            expected_columns = ["id", "name", "value"]
+
+            success = (
+                len(rows) == 3
+                and desc_names == expected_columns
+                and rows[0][1] == "row_one"
+                and rows[1][1] == "row_two"
+                and rows[2][1] == "row_three"
+            )
+
+            return Response.json(
+                {
+                    "test": "multi_row_result",
+                    "success": success,
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "rowcount": rowcount,
+                    "description_names": desc_names,
+                    "expected_columns": expected_columns,
+                }
+            )
+        except Exception as e:
+            try:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                await cursor.execute_async(f"DROP TABLE IF EXISTS {table_name}")
+                conn.close()
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "multi_row_result", "success": False, "error": str(e)},
                 status=500,
             )
 

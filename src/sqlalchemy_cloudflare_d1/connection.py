@@ -134,6 +134,90 @@ def _build_description(
         return []
 
 
+def _convert_js_null(value: Any) -> Any:
+    """Convert JsNull/JsUndefined to Python None."""
+    if value is None:
+        return None
+    type_name = type(value).__name__
+    if type_name in ("JsNull", "JsUndefined", "JsProxy"):
+        if hasattr(value, "to_py"):
+            return value.to_py()
+        return None
+    return value
+
+
+def _get_attr_or_key(obj: Any, key: str, default: Any = None) -> Any:
+    """Get value from object by attribute or key access."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _parse_all_result(all_result: Any) -> Dict[str, Any]:
+    """Parse the result from D1's stmt.all() into a standard dict format.
+
+    all() returns {results: [{col: val, ...}, ...], meta: {...}, success: bool}
+    This may be a JsProxy or a Python dict depending on whether to_py() was called.
+
+    Args:
+        all_result: The result from stmt.all() (JsProxy or dict after to_py())
+
+    Returns:
+        Standardized dict with results, columns, meta, and success keys
+    """
+    # Convert top-level JsProxy to Python
+    if hasattr(all_result, "to_py"):
+        all_result = all_result.to_py()
+
+    columns: List[str] = []
+    results: List[Dict[str, Any]] = []
+    meta: Dict[str, Any] = {}
+
+    # Extract results array
+    raw_results = _get_attr_or_key(all_result, "results")
+    if hasattr(raw_results, "to_py"):
+        raw_results = raw_results.to_py()
+
+    if raw_results and len(raw_results) > 0:
+        # Extract column names from first result object's keys
+        first = raw_results[0]
+        if hasattr(first, "to_py"):
+            first = first.to_py()
+        if isinstance(first, dict):
+            columns = list(first.keys())
+        elif hasattr(first, "keys"):
+            columns = list(first.keys())
+
+        for row_obj in raw_results:
+            if hasattr(row_obj, "to_py"):
+                row_obj = row_obj.to_py()
+            if isinstance(row_obj, dict):
+                row_dict = {col: _convert_js_null(val) for col, val in row_obj.items()}
+                results.append(row_dict)
+            else:
+                # JsProxy object with attribute access
+                row_dict = {
+                    col: _convert_js_null(getattr(row_obj, col, None))
+                    for col in columns
+                }
+                results.append(row_dict)
+
+    # Extract meta
+    meta_obj = _get_attr_or_key(all_result, "meta")
+    if meta_obj is not None:
+        if hasattr(meta_obj, "to_py"):
+            meta = meta_obj.to_py()
+        elif isinstance(meta_obj, dict):
+            meta = meta_obj
+
+    return {
+        "results": results,
+        "columns": columns,
+        "meta": meta if isinstance(meta, dict) else {},
+        "success": True,
+    }
+
+
 # MARK: - Row Class
 
 
@@ -581,41 +665,44 @@ class WorkerConnection:
                 else:
                     stmt = stmt.bind(parameters)
 
-            # MARK: - Execute using raw({columnNames: true}) for reliable column metadata
-            # This returns column names even on empty results
-            raw_result = await stmt.raw({"columnNames": True})
+            # MARK: - Execute using all() for reliable structured results
+            # all() returns {results: [{col: val, ...}, ...], meta: {...}}
+            # This avoids the raw() bug where single-row results lose the
+            # column names header row, causing data to end up in description.
+            all_result = await stmt.all()
 
-            # Convert JsProxy to Python list if needed
-            if hasattr(raw_result, "to_py"):
-                raw_result = raw_result.to_py()
+            parsed = _parse_all_result(all_result)
 
-            # raw() returns array of arrays: first row is column names, rest are data
-            columns = []
-            results = []
+            # MARK: - Fall back to raw() for column names on empty results
+            # all() doesn't return column info when results are empty.
+            # raw({columnNames: true}) works correctly for 0-row results.
+            # Only do this for SELECT queries to avoid re-executing mutations.
+            if (
+                not parsed["columns"]
+                and not parsed["results"]
+                and query.strip().upper().startswith("SELECT")
+            ):
+                try:
+                    stmt2 = self._d1.prepare(query)
+                    if parameters:
+                        if isinstance(parameters, (tuple, list)):
+                            stmt2 = stmt2.bind(*parameters)
+                        elif isinstance(parameters, dict):
+                            stmt2 = stmt2.bind(*parameters.values())
+                        else:
+                            stmt2 = stmt2.bind(parameters)
+                    raw_result = await stmt2.raw({"columnNames": True})
+                    if hasattr(raw_result, "to_py"):
+                        raw_result = raw_result.to_py()
+                    if raw_result and len(raw_result) > 0:
+                        first_row = raw_result[0]
+                        if hasattr(first_row, "to_py"):
+                            first_row = first_row.to_py()
+                        parsed["columns"] = list(first_row) if first_row else []
+                except Exception:
+                    pass  # Column names are best-effort for empty results
 
-            if raw_result and len(raw_result) > 0:
-                # First row contains column names
-                first_row = raw_result[0]
-                if hasattr(first_row, "to_py"):
-                    first_row = first_row.to_py()
-                columns = list(first_row) if first_row else []
-
-                # Remaining rows are data
-                for row in raw_result[1:]:
-                    if hasattr(row, "to_py"):
-                        row = row.to_py()
-                    # Convert row array to dict using column names
-                    row_dict = dict(zip(columns, row))
-                    results.append(row_dict)
-
-            # Note: raw() doesn't return meta, so we return empty meta
-            # If meta is needed, we'd need a separate call
-            return {
-                "results": results,
-                "columns": columns,
-                "meta": {},
-                "success": True,
-            }
+            return parsed
 
         except Exception as e:
             raise OperationalError(f"D1 Worker query failed: {e}")
@@ -1085,57 +1172,51 @@ class SyncWorkerConnection:
                     else:
                         stmt = stmt.bind(convert_param(parameters))
 
-                # MARK: - Execute using raw({columnNames: true}) for reliable column metadata
-                # This returns column names even on empty results
-                return await stmt.raw({"columnNames": True})
+                # MARK: - Execute using all() for reliable structured results
+                # all() returns {results: [{col: val, ...}, ...], meta: {...}}
+                # This avoids the raw() bug where single-row results lose the
+                # column names header row, causing data to end up in description.
+                all_result = await stmt.all()
 
-            raw_result = run_sync(_run())
+                # For empty results, fall back to raw() for column names
+                # all() doesn't return column info when results are empty.
+                # raw({columnNames: true}) works correctly for 0-row results.
+                # Only do this for SELECT queries to avoid re-executing mutations.
+                fallback_columns = None
+                parsed = _parse_all_result(all_result)
+                if (
+                    not parsed["columns"]
+                    and not parsed["results"]
+                    and query.strip().upper().startswith("SELECT")
+                ):
+                    try:
+                        stmt2 = self._d1.prepare(query)
+                        if parameters:
+                            if isinstance(parameters, (tuple, list)):
+                                converted2 = [convert_param(p) for p in parameters]
+                                stmt2 = stmt2.bind(*converted2)
+                            elif isinstance(parameters, dict):
+                                converted2 = [
+                                    convert_param(v) for v in parameters.values()
+                                ]
+                                stmt2 = stmt2.bind(*converted2)
+                            else:
+                                stmt2 = stmt2.bind(convert_param(parameters))
+                        raw_result = await stmt2.raw({"columnNames": True})
+                        if hasattr(raw_result, "to_py"):
+                            raw_result = raw_result.to_py()
+                        if raw_result and len(raw_result) > 0:
+                            first_row = raw_result[0]
+                            if hasattr(first_row, "to_py"):
+                                first_row = first_row.to_py()
+                            fallback_columns = list(first_row) if first_row else []
+                    except Exception:
+                        pass
+                if fallback_columns:
+                    parsed["columns"] = fallback_columns
+                return parsed
 
-            # Convert JsProxy to Python list if needed
-            if hasattr(raw_result, "to_py"):
-                raw_result = raw_result.to_py()
-
-            def convert_js_null(value):
-                """Convert JsNull/JsUndefined to Python None."""
-                if value is None:
-                    return None
-                # Check for JsNull/JsUndefined by type name (avoid import issues)
-                type_name = type(value).__name__
-                if type_name in ("JsNull", "JsUndefined", "JsProxy"):
-                    if hasattr(value, "to_py"):
-                        return value.to_py()
-                    # JsNull.to_py() returns None, but if it's still JsNull, return None
-                    return None
-                return value
-
-            # raw() returns array of arrays: first row is column names, rest are data
-            columns = []
-            results = []
-
-            if raw_result and len(raw_result) > 0:
-                # First row contains column names
-                first_row = raw_result[0]
-                if hasattr(first_row, "to_py"):
-                    first_row = first_row.to_py()
-                columns = list(first_row) if first_row else []
-
-                # Remaining rows are data
-                for row in raw_result[1:]:
-                    if hasattr(row, "to_py"):
-                        row = row.to_py()
-                    # Convert row array to dict using column names, handling JsNull
-                    row_dict = {
-                        col: convert_js_null(val) for col, val in zip(columns, row)
-                    }
-                    results.append(row_dict)
-
-            # Note: raw() doesn't return meta, so we return empty meta
-            return {
-                "results": results,
-                "columns": columns,
-                "meta": {},
-                "success": True,
-            }
+            return run_sync(_run())
 
         except ImportError:
             raise NotSupportedError(

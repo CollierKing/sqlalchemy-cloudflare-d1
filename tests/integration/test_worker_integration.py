@@ -653,3 +653,59 @@ class TestOnConflictAdvanced:
         assert data["test"] == "on_conflict_where"
         assert data["success"] is True
         assert data["is_verified"] is True
+
+
+# MARK: - Single-Row Result Tests
+
+
+class TestSingleRowResult:
+    """Test that single-row query results are returned correctly.
+
+    Regression tests for bug where single-row results end up in
+    cursor.description instead of being returned by fetchall().
+    """
+
+    def test_single_row_fetchall_returns_data(self, dev_server):
+        """Test single-row SELECT returns the row in fetchall()."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/single-row-result")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "single_row_result"
+        assert data["success"] is True, (
+            f"Single-row bug: row_count={data.get('row_count')}, "
+            f"description_names={data.get('description_names')}, "
+            f"expected_columns={data.get('expected_columns')}"
+        )
+        assert data["row_count"] == 1
+        assert data["description_names"] == ["id", "name", "value"]
+
+    def test_single_row_sqlalchemy(self, dev_server):
+        """Test single-row result via SQLAlchemy engine."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/single-row-sqlalchemy")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "single_row_sqlalchemy"
+        assert data["success"] is True, (
+            f"Single-row SQLAlchemy bug: rows={data.get('rows')}, "
+            f"columns={data.get('columns')}"
+        )
+        assert len(data["rows"]) == 1
+
+    def test_multi_row_description_has_column_names(self, dev_server):
+        """Test multi-row SELECT has correct column names in description."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/multi-row-result")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "multi_row_result"
+        assert data["success"] is True
+        assert data["row_count"] == 3
+        assert data["description_names"] == ["id", "name", "value"]
