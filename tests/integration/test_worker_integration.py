@@ -750,9 +750,9 @@ class TestAutoincrementInsert:
             f"http://localhost:{port}/autoincrement-insert-sqlalchemy"
         )
 
-        assert (
-            response.status_code == 200
-        ), f"ORM autoincrement failed: {response.json()}"
+        assert response.status_code == 200, (
+            f"ORM autoincrement failed: {response.json()}"
+        )
         data = response.json()
 
         assert data["test"] == "autoincrement_insert_sqlalchemy"
@@ -769,9 +769,9 @@ class TestAutoincrementInsert:
         port = dev_server
         response = requests.get(f"http://localhost:{port}/autoincrement-lastrowid")
 
-        assert (
-            response.status_code == 200
-        ), f"inserted_primary_key failed: {response.json()}"
+        assert response.status_code == 200, (
+            f"inserted_primary_key failed: {response.json()}"
+        )
         data = response.json()
 
         assert data["test"] == "autoincrement_lastrowid"
@@ -803,9 +803,9 @@ class TestWorkerDateTimeColumn:
         data = response.json()
 
         assert data["test"] == "datetime_basic"
-        assert (
-            data["success"] is True
-        ), f"datetime_basic failed: error={data.get('error')}"
+        assert data["success"] is True, (
+            f"datetime_basic failed: error={data.get('error')}"
+        )
         assert data["title"] == "Test"
         assert data["created_at_type"] == "datetime"
 
@@ -814,15 +814,15 @@ class TestWorkerDateTimeColumn:
         port = dev_server
         response = requests.get(f"http://localhost:{port}/datetime-non-utc")
 
-        assert (
-            response.status_code == 200
-        ), f"datetime_non_utc failed: {response.json()}"
+        assert response.status_code == 200, (
+            f"datetime_non_utc failed: {response.json()}"
+        )
         data = response.json()
 
         assert data["test"] == "datetime_non_utc"
-        assert (
-            data["success"] is True
-        ), f"datetime_non_utc failed: error={data.get('error')}"
+        assert data["success"] is True, (
+            f"datetime_non_utc failed: error={data.get('error')}"
+        )
         assert data["origin_type"] == "datetime"
         assert data["indexed_type"] == "datetime"
 
@@ -831,15 +831,15 @@ class TestWorkerDateTimeColumn:
         port = dev_server
         response = requests.get(f"http://localhost:{port}/datetime-nullable")
 
-        assert (
-            response.status_code == 200
-        ), f"datetime_nullable failed: {response.json()}"
+        assert response.status_code == 200, (
+            f"datetime_nullable failed: {response.json()}"
+        )
         data = response.json()
 
         assert data["test"] == "datetime_nullable"
-        assert (
-            data["success"] is True
-        ), f"datetime_nullable failed: error={data.get('error')}"
+        assert data["success"] is True, (
+            f"datetime_nullable failed: error={data.get('error')}"
+        )
         assert data["published_has_datetime"] is True
         assert data["draft_is_none"] is True
 
@@ -852,9 +852,9 @@ class TestWorkerDateTimeColumn:
         data = response.json()
 
         assert data["test"] == "datetime_orm"
-        assert (
-            data["success"] is True
-        ), f"datetime_orm failed: error={data.get('error')}"
+        assert data["success"] is True, (
+            f"datetime_orm failed: error={data.get('error')}"
+        )
         assert data["entry_id"] == 1
         assert data["entry_title"] == "Issue 13 DateTime Test"
         assert data["origin_is_datetime"] is True

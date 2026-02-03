@@ -38,7 +38,7 @@ dev = [
     "black>=23.0.0",
     "isort>=5.12.0",
     "mypy>=1.0.0",
-    "ruff>=0.0.280",
+    "ruff==0.12.4",
 ]
 
 [project.urls]
@@ -89,5 +89,5 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-socket>=0.7.0",
     "requests>=2.31.0",
-    "ruff>=0.0.280",
+    "ruff==0.12.4",
 ]

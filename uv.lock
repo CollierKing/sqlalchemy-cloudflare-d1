@@ -964,7 +964,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.280" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.12.4" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
@@ -979,7 +979,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-socket", specifier = ">=0.7.0" },
     { name = "requests", specifier = ">=2.31.0" },
-    { name = "ruff", specifier = ">=0.0.280" },
+    { name = "ruff", specifier = "==0.12.4" },
 ]
 
 [[package]]
