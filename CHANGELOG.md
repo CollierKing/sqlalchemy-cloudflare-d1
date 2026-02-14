@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.8]
+
+### Added
+
+- `Time` column type support ([#18](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/18))
+  - Added `D1Time` type processor that converts Python `time` objects to ISO 8601 strings on bind and parses them back on result
+  - Supports nullable time columns, time filtering/comparison, and ORM usage
+  - Works in both REST API and Worker modes
+
+### Changed
+
+- Updated README Type Mapping table to document all custom type processors (`D1Boolean`, `D1Date`, `D1Time`, `D1DateTime`, `D1LargeBinary`)
+
+
 ## [0.3.7]
 
 ### Added

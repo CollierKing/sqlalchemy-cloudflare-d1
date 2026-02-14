@@ -138,6 +138,13 @@ class Default(WorkerEntrypoint):
             return await self.test_date_nullable()
         elif path == "date-orm":
             return await self.test_date_orm()
+        # Time column tests (GitHub issue #18)
+        elif path == "time-basic":
+            return await self.test_time_basic()
+        elif path == "time-nullable":
+            return await self.test_time_nullable()
+        elif path == "time-orm":
+            return await self.test_time_orm()
         else:
             return await self.index()
 
@@ -196,6 +203,9 @@ class Default(WorkerEntrypoint):
                 "/date-basic": "Test Date column insert/retrieve",
                 "/date-nullable": "Test nullable Date columns",
                 "/date-orm": "Test Date via ORM session",
+                "/time-basic": "Test Time column insert/retrieve",
+                "/time-nullable": "Test nullable Time columns",
+                "/time-orm": "Test Time via ORM session",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -3396,6 +3406,228 @@ class Default(WorkerEntrypoint):
             return Response.json(
                 {
                     "test": "date_orm",
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                status=500,
+            )
+
+    # MARK: - Time Column Tests
+
+    async def test_time_basic(self):
+        """Test Time column insert and retrieve."""
+        from datetime import time
+        from sqlalchemy import (
+            Column,
+            Integer,
+            MetaData,
+            String,
+            Table,
+            Time,
+            select,
+        )
+
+        table_name = f"test_time_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("event_time", Time),
+            )
+
+            metadata.create_all(engine)
+
+            time_value = time(14, 30, 45)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", event_time=time_value)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_time)
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = (
+                row is not None
+                and row[0] == "Test"
+                and isinstance(row[1], time)
+                and row[1].hour == 14
+                and row[1].minute == 30
+                and row[1].second == 45
+            )
+
+            return Response.json(
+                {
+                    "test": "time_basic",
+                    "success": success,
+                    "title": row[0] if row else None,
+                    "event_time_type": type(row[1]).__name__ if row else None,
+                    "hour": row[1].hour if row and isinstance(row[1], time) else None,
+                    "minute": row[1].minute
+                    if row and isinstance(row[1], time)
+                    else None,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "time_basic", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_time_nullable(self):
+        """Test nullable Time columns handle NULL correctly."""
+        from datetime import time
+        from sqlalchemy import (
+            Column,
+            Integer,
+            MetaData,
+            String,
+            Table,
+            Time,
+            select,
+        )
+
+        table_name = f"test_time_null_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("event_time", Time, nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        title="With Time",
+                        event_time=time(9, 0, 0),
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(title="No Time", event_time=None)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_time).order_by(
+                        test_table.c.id
+                    )
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = (
+                len(rows) == 2
+                and rows[0][0] == "With Time"
+                and isinstance(rows[0][1], time)
+                and rows[1][0] == "No Time"
+                and rows[1][1] is None
+            )
+
+            return Response.json(
+                {
+                    "test": "time_nullable",
+                    "success": success,
+                    "with_time_is_time": isinstance(rows[0][1], time)
+                    if rows
+                    else False,
+                    "no_time_is_none": rows[1][1] is None if len(rows) > 1 else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "time_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_time_orm(self):
+        """Test Time via ORM session."""
+        from datetime import time
+        from sqlalchemy import Integer, String, Time
+        from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+        engine = create_engine_from_binding(self.env.DB)
+        table_name = f"test_time_orm_{uuid.uuid4().hex[:8]}"
+
+        try:
+
+            class Base(DeclarativeBase):
+                pass
+
+            class Schedule(Base):
+                __tablename__ = table_name
+                id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+                title: Mapped[str] = mapped_column(String(127))
+                start_time: Mapped[time] = mapped_column(Time)
+
+            Base.metadata.create_all(engine)
+
+            test_time = time(14, 30, 45)
+
+            with Session(engine) as session:
+                entry = Schedule(
+                    title="Time Test Entry",
+                    start_time=test_time,
+                )
+                session.add(entry)
+                session.commit()
+                session.refresh(entry)
+                entry_title = entry.title
+                start_time_is_time = isinstance(entry.start_time, time)
+                start_time_value = entry.start_time
+
+            Base.metadata.drop_all(engine)
+
+            success = start_time_is_time and start_time_value == test_time
+
+            return Response.json(
+                {
+                    "test": "time_orm",
+                    "success": success,
+                    "entry_title": entry_title,
+                    "start_time_is_time": start_time_is_time,
+                }
+            )
+        except Exception as e:
+            try:
+                from sqlalchemy import MetaData, Table
+
+                md = MetaData()
+                Table(table_name, md)
+                md.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {
+                    "test": "time_orm",
                     "success": False,
                     "error": str(e),
                     "error_type": type(e).__name__,

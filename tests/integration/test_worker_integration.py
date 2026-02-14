@@ -910,3 +910,53 @@ class TestWorkerDateTimeColumn:
         assert data["origin_is_datetime"] is True
         assert data["indexed_is_datetime"] is True
         assert data["inserted_is_datetime"] is True
+
+
+# MARK: - Time Column Tests (Issue #18)
+
+
+class TestWorkerTimeColumn:
+    """Test Time column handling via Worker endpoints.
+
+    These tests mirror the TestTimeColumn tests in test_restapi_integration.py.
+    """
+
+    def test_time_insert_and_retrieve(self, dev_server):
+        """Test Time column insert and retrieve."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/time-basic")
+
+        assert response.status_code == 200, f"time_basic failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "time_basic"
+        assert data["success"] is True, f"time_basic failed: error={data.get('error')}"
+        assert data["event_time_type"] == "time"
+
+    def test_time_nullable(self, dev_server):
+        """Test nullable Time columns handle NULL correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/time-nullable")
+
+        assert response.status_code == 200, f"time_nullable failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "time_nullable"
+        assert data["success"] is True, (
+            f"time_nullable failed: error={data.get('error')}"
+        )
+        assert data["with_time_is_time"] is True
+        assert data["no_time_is_none"] is True
+
+    def test_time_orm_session(self, dev_server):
+        """Test Time via ORM session."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/time-orm")
+
+        assert response.status_code == 200, f"time_orm failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "time_orm"
+        assert data["success"] is True, f"time_orm failed: error={data.get('error')}"
+        assert data["entry_title"] == "Time Test Entry"
+        assert data["start_time_is_time"] is True

@@ -3,7 +3,7 @@ SQLAlchemy dialect for Cloudflare D1.
 """
 
 import base64
-from datetime import datetime, date
+from datetime import date, datetime, time
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.engine import default
@@ -17,6 +17,7 @@ from sqlalchemy.sql.sqltypes import (
     REAL,
     TEXT,
     Date,
+    Time,
 )
 from sqlalchemy import text
 
@@ -160,6 +161,53 @@ class D1Date(Date):
         return process
 
 
+# MARK: - Time Type Processor
+
+
+class D1Time(Time):
+    """Custom Time type for Cloudflare D1.
+
+    D1 does not accept Python time objects as bind parameters - they arrive
+    as JS `object` type and raise D1_TYPE_ERROR. This type processor converts
+    time objects to ISO 8601 strings on bind and parses them back on result.
+    """
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Any], Optional[str]]:
+        """Convert Python time to ISO 8601 string for D1."""
+
+        # MARK: - bind_processor
+        def process(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, time):
+                return value.isoformat()
+            if isinstance(value, str):
+                return value
+            return str(value)
+
+        return process
+
+    def result_processor(
+        self, dialect: Dialect, coltype: Any
+    ) -> Callable[[Any], Optional[time]]:
+        """Convert ISO 8601 string from D1 back to Python time."""
+
+        # MARK: - result_processor
+        def process(value: Any) -> Optional[time]:
+            if value is None:
+                return None
+            if isinstance(value, time):
+                return value
+            if isinstance(value, str):
+                try:
+                    return time.fromisoformat(value)
+                except ValueError:
+                    return value
+            return value
+
+        return process
+
+
 # MARK: - DateTime Type Processor
 
 
@@ -245,6 +293,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
         Date: D1Date,
         DateTime: D1DateTime,
         LargeBinary: D1LargeBinary,
+        Time: D1Time,
     }
 
     # Reserved words (SQLite keywords)

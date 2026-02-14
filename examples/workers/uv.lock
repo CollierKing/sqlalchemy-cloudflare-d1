@@ -614,7 +614,7 @@ wheels = [
 
 [[package]]
 name = "sqlalchemy-cloudflare-d1"
-version = "0.3.7"
+version = "0.3.8"
 source = { editable = "../../" }
 dependencies = [
     { name = "httpx" },
@@ -640,6 +640,7 @@ provides-extras = ["async", "dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "codespell", specifier = ">=2.4.1" },
+    { name = "greenlet", specifier = ">=3.2.3" },
     { name = "mypy", specifier = ">=1.17.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pytest", specifier = ">=8.4.1" },
