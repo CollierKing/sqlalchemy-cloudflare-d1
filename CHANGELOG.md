@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.7]
+
+### Added
+
+- `Date` column type support ([#15](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/15))
+  - Added `D1Date` type processor that converts Python `date` objects to ISO 8601 strings on bind and parses them back on result
+  - Supports nullable date columns, date filtering/comparison, and ORM usage
+  - Works in both REST API and Worker modes
+  - Thanks to [@xelandernt](https://github.com/xelandernt) for the contribution ([PR #16](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/pull/16))
+
+
 ## [0.3.6]
 
 ### Fixed
