@@ -785,6 +785,56 @@ class TestAutoincrementInsert:
         assert data["lastrowid_2"] == 2
 
 
+# MARK: = Date Column Tests (Issue #15)
+
+
+class TestWorkerDateColumn:
+    """Test Date column handling via Worker endpoints.
+
+    These tests mirror the TestDateColumn tests in test_restapi_integration.py.
+    """
+
+    def test_date_insert_and_retrieve(self, dev_server):
+        """Test Date column insert and retrieve."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/date-basic")
+
+        assert response.status_code == 200, f"date_basic failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "date_basic"
+        assert data["success"] is True, f"date_basic failed: error={data.get('error')}"
+        assert data["birth_date_type"] == "date"
+
+    def test_date_nullable(self, dev_server):
+        """Test nullable Date columns handle NULL correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/date-nullable")
+
+        assert response.status_code == 200, f"date_nullable failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "date_nullable"
+        assert data["success"] is True, (
+            f"date_nullable failed: error={data.get('error')}"
+        )
+        assert data["with_date_is_date"] is True
+        assert data["no_date_is_none"] is True
+
+    def test_date_orm_session(self, dev_server):
+        """Test Date via ORM session."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/date-orm")
+
+        assert response.status_code == 200, f"date_orm failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "date_orm"
+        assert data["success"] is True, f"date_orm failed: error={data.get('error')}"
+        assert data["event_title"] == "Date Test Event"
+        assert data["event_date_is_date"] is True
+
+
 # MARK: - DateTime Column Tests (Issue #13)
 
 

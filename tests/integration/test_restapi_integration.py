@@ -2459,6 +2459,175 @@ class TestAutoincrementInsert:
             Base.metadata.drop_all(d1_engine)
 
 
+# MARK - Date Column Tests (Issue #15)
+
+
+class TestDateColumn:
+    """Test Date column handling.
+
+    D1 does not accept Python date objects as bind parameters. The
+    D1Date type processor converts dates to ISO 8601 strings on bind
+    and parses them back on result.
+    """
+
+    def test_date_insert_and_retrieve(self, d1_engine, test_table_name):
+        """Test that Date columns can store and retrieve date values."""
+        from datetime import date
+        from sqlalchemy import Date
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("birth_date", Date),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            date_value = date(2025, 12, 29)
+
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", birth_date=date_value)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.birth_date)
+                )
+                row = result.fetchone()
+
+            assert row is not None
+            assert row[0] == "Test"
+            assert isinstance(row[1], date)
+            assert row[1].year == 2025
+            assert row[1].month == 12
+            assert row[1].day == 29
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_date_nullable(self, d1_engine, test_table_name):
+        """Test nullable Date columns handle NULL correctly."""
+        from datetime import date
+        from sqlalchemy import Date
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("event_date", Date, nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                # Insert row with NULL date
+                conn.execute(
+                    test_table.insert().values(title="No Date", event_date=None)
+                )
+
+                # Insert row with actual date
+                conn.execute(
+                    test_table.insert().values(
+                        title="With Date", event_date=date(2025, 1, 1)
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_date)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 2
+            assert rows[0][1] is None
+            assert isinstance(rows[1][1], date)
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_date_orm_session(self, d1_engine):
+        """Test Date via ORM session."""
+        from datetime import date
+        from sqlalchemy import Date
+        from sqlalchemy.orm import Mapped, Session, declarative_base, mapped_column
+
+        Base = declarative_base()
+
+        class Event(Base):
+            __tablename__ = f"events_{uuid.uuid4().hex[:8]}"
+
+            id: Mapped[int] = mapped_column(Integer, primary_key=True)
+            title: Mapped[str] = mapped_column(String(127))
+            event_date: Mapped[date] = mapped_column(Date)
+
+        Base.metadata.create_all(d1_engine)
+
+        try:
+            test_date = date(2025, 12, 29)
+
+            with Session(d1_engine) as session:
+                event = Event(title="Test Event", event_date=test_date)
+                session.add(event)
+                session.commit()
+
+                # Query back
+                retrieved_event = session.query(Event).first()
+
+                assert retrieved_event is not None
+                assert retrieved_event.title == "Test Event"
+                assert isinstance(retrieved_event.event_date, date)
+                assert retrieved_event.event_date == test_date
+        finally:
+            Base.metadata.drop_all(d1_engine)
+
+    def test_date_filter_query(self, d1_engine, test_table_name):
+        """Test filtering by Date column values."""
+        from datetime import date
+        from sqlalchemy import Date
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("event_date", Date),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            date_old = date(2024, 1, 1)
+            date_new = date(2025, 6, 15)
+
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Old", event_date=date_old)
+                )
+                conn.execute(
+                    test_table.insert().values(title="New", event_date=date_new)
+                )
+                conn.commit()
+
+                # Filter for entries after 2025-01-01
+                cutoff = date(2025, 1, 1).isoformat()
+                result = conn.execute(
+                    select(test_table.c.title).where(test_table.c.event_date > cutoff)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 1
+            assert rows[0][0] == "New"
+        finally:
+            metadata.drop_all(d1_engine)
+
+
 # MARK: - DateTime Column Tests (Issue #13)
 
 

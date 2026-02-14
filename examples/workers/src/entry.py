@@ -131,6 +131,13 @@ class Default(WorkerEntrypoint):
             return await self.test_datetime_nullable()
         elif path == "datetime-orm":
             return await self.test_datetime_orm()
+        # Date column tests (GitHub issue #15)
+        elif path == "date-basic":
+            return await self.test_date_basic()
+        elif path == "date-nullable":
+            return await self.test_date_nullable()
+        elif path == "date-orm":
+            return await self.test_date_orm()
         else:
             return await self.index()
 
@@ -186,6 +193,9 @@ class Default(WorkerEntrypoint):
                 "/datetime-non-utc": "Test DateTime with non-UTC timezone",
                 "/datetime-nullable": "Test nullable DateTime columns",
                 "/datetime-orm": "Test DateTime via ORM session",
+                "/date-basic": "Test Date column insert/retrieve",
+                "/date-nullable": "Test nullable Date columns",
+                "/date-orm": "Test Date via ORM session",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -3169,6 +3179,223 @@ class Default(WorkerEntrypoint):
             return Response.json(
                 {
                     "test": "datetime_orm",
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                status=500,
+            )
+
+    async def test_date_basic(self):
+        """Test Date column insert and retrieve."""
+        from datetime import date
+        from sqlalchemy import (
+            Column,
+            Date,
+            Integer,
+            MetaData,
+            String,
+            Table,
+            select,
+        )
+
+        table_name = f"test_date_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("birth_date", Date),
+            )
+
+            metadata.create_all(engine)
+
+            date_value = date(2025, 12, 29)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", birth_date=date_value)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.birth_date)
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = (
+                row is not None
+                and row[0] == "Test"
+                and isinstance(row[1], date)
+                and row[1].year == 2025
+                and row[1].month == 12
+                and row[1].day == 29
+            )
+
+            return Response.json(
+                {
+                    "test": "date_basic",
+                    "success": success,
+                    "title": row[0] if row else None,
+                    "birth_date_type": type(row[1]).__name__ if row else None,
+                    "year": row[1].year if row and isinstance(row[1], date) else None,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "date_basic", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_date_nullable(self):
+        """Test nullable Date columns handle NULL correctly."""
+        from datetime import date
+        from sqlalchemy import (
+            Column,
+            Date,
+            Integer,
+            MetaData,
+            String,
+            Table,
+            select,
+        )
+
+        table_name = f"test_date_null_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("event_date", Date, nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        title="With Date",
+                        event_date=date(2025, 1, 1),
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(title="No Date", event_date=None)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_date).order_by(
+                        test_table.c.id
+                    )
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = (
+                len(rows) == 2
+                and rows[0][0] == "With Date"
+                and isinstance(rows[0][1], date)
+                and rows[1][0] == "No Date"
+                and rows[1][1] is None
+            )
+
+            return Response.json(
+                {
+                    "test": "date_nullable",
+                    "success": success,
+                    "with_date_is_date": isinstance(rows[0][1], date)
+                    if rows
+                    else False,
+                    "no_date_is_none": rows[1][1] is None if len(rows) > 1 else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "date_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_date_orm(self):
+        """Test Date via ORM session."""
+        from datetime import date
+        from sqlalchemy import Integer, String, Date
+        from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+        engine = create_engine_from_binding(self.env.DB)
+        table_name = f"test_date_orm_{uuid.uuid4().hex[:8]}"
+
+        try:
+
+            class Base(DeclarativeBase):
+                pass
+
+            class Event(Base):
+                __tablename__ = table_name
+                id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+                title: Mapped[str] = mapped_column(String(127))
+                event_date: Mapped[date] = mapped_column(Date)
+
+            Base.metadata.create_all(engine)
+
+            test_date = date(2025, 12, 29)
+
+            with Session(engine) as session:
+                event = Event(
+                    title="Date Test Event",
+                    event_date=test_date,
+                )
+                session.add(event)
+                session.commit()
+                session.refresh(event)
+                event_title = event.title
+                event_date_is_date = isinstance(event.event_date, date)
+                event_date_value = event.event_date
+
+            Base.metadata.drop_all(engine)
+
+            success = event_date_is_date and event_date_value == test_date
+
+            return Response.json(
+                {
+                    "test": "date_orm",
+                    "success": success,
+                    "event_title": event_title,
+                    "event_date_is_date": event_date_is_date,
+                }
+            )
+        except Exception as e:
+            try:
+                from sqlalchemy import MetaData, Table
+
+                md = MetaData()
+                Table(table_name, md)
+                md.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {
+                    "test": "date_orm",
                     "success": False,
                     "error": str(e),
                     "error_type": type(e).__name__,
