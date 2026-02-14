@@ -946,6 +946,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "codespell" },
+    { name = "greenlet" },
     { name = "mypy" },
     { name = "pandas" },
     { name = "pytest" },
@@ -973,6 +974,7 @@ provides-extras = ["async", "dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "codespell", specifier = ">=2.4.1" },
+    { name = "greenlet", specifier = ">=3.2.3" },
     { name = "mypy", specifier = ">=1.17.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pytest", specifier = ">=8.4.1" },

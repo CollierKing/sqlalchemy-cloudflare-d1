@@ -83,6 +83,7 @@ addopts = "--ignore=tests/integration"
 [dependency-groups]
 dev = [
     "codespell>=2.4.1",
+    "greenlet>=3.2.3",
     "mypy>=1.17.0",
     "pandas>=2.0.0",
     "pytest>=8.4.1",
