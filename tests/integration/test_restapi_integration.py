@@ -2849,5 +2849,171 @@ class TestDateTimeColumn:
             metadata.drop_all(d1_engine)
 
 
+# MARK: - Time Column Tests (Issue #18)
+
+
+class TestTimeColumn:
+    """Test Time column handling.
+
+    D1 does not accept Python time objects as bind parameters. The
+    D1Time type processor converts times to ISO 8601 strings on bind
+    and parses them back on result.
+    """
+
+    def test_time_insert_and_retrieve(self, d1_engine, test_table_name):
+        """Test that Time columns can store and retrieve time values."""
+        from datetime import time
+        from sqlalchemy import Time
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("event_time", Time),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            time_value = time(14, 30, 45)
+
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", event_time=time_value)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_time)
+                )
+                row = result.fetchone()
+
+            assert row is not None
+            assert row[0] == "Test"
+            assert isinstance(row[1], time)
+            assert row[1].hour == 14
+            assert row[1].minute == 30
+            assert row[1].second == 45
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_time_nullable(self, d1_engine, test_table_name):
+        """Test nullable Time columns handle NULL correctly."""
+        from datetime import time
+        from sqlalchemy import Time
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("event_time", Time, nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="No Time", event_time=None)
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        title="With Time", event_time=time(9, 0, 0)
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.event_time)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 2
+            assert rows[0][1] is None
+            assert isinstance(rows[1][1], time)
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_time_orm_session(self, d1_engine):
+        """Test Time via ORM session."""
+        from datetime import time
+        from sqlalchemy import Time
+        from sqlalchemy.orm import Mapped, Session, declarative_base, mapped_column
+
+        Base = declarative_base()
+
+        class Schedule(Base):
+            __tablename__ = f"schedules_{uuid.uuid4().hex[:8]}"
+
+            id: Mapped[int] = mapped_column(Integer, primary_key=True)
+            title: Mapped[str] = mapped_column(String(127))
+            start_time: Mapped[time] = mapped_column(Time)
+
+        Base.metadata.create_all(d1_engine)
+
+        try:
+            test_time = time(14, 30, 45)
+
+            with Session(d1_engine) as session:
+                entry = Schedule(title="Test Entry", start_time=test_time)
+                session.add(entry)
+                session.commit()
+
+                retrieved = session.query(Schedule).first()
+
+                assert retrieved is not None
+                assert retrieved.title == "Test Entry"
+                assert isinstance(retrieved.start_time, time)
+                assert retrieved.start_time == test_time
+        finally:
+            Base.metadata.drop_all(d1_engine)
+
+    def test_time_filter_query(self, d1_engine, test_table_name):
+        """Test filtering by Time column values."""
+        from datetime import time
+        from sqlalchemy import Time
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("event_time", Time),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            time_morning = time(8, 0, 0)
+            time_afternoon = time(15, 30, 0)
+
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Morning", event_time=time_morning)
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        title="Afternoon", event_time=time_afternoon
+                    )
+                )
+                conn.commit()
+
+                cutoff = time(12, 0, 0).isoformat()
+                result = conn.execute(
+                    select(test_table.c.title).where(test_table.c.event_time > cutoff)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 1
+            assert rows[0][0] == "Afternoon"
+        finally:
+            metadata.drop_all(d1_engine)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

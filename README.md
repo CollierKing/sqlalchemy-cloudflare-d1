@@ -374,10 +374,11 @@ This dialect has some limitations due to D1's REST API nature:
 | `Text` | `TEXT` | |
 | `Float` | `REAL` | |
 | `Numeric` | `NUMERIC` | |
-| `Boolean` | `INTEGER` | Stored as 0/1 |
-| `DateTime` | `TEXT` | ISO format string |
-| `Date` | `TEXT` | ISO format string |
-| `Time` | `TEXT` | ISO format string |
+| `Boolean` | `INTEGER` | Stored as 0/1, auto-converted via `D1Boolean` |
+| `DateTime` | `TEXT` | ISO 8601 string, auto-converted via `D1DateTime` |
+| `Date` | `TEXT` | ISO 8601 string, auto-converted via `D1Date` |
+| `Time` | `TEXT` | ISO 8601 string, auto-converted via `D1Time` |
+| `LargeBinary` | `BLOB` | Base64-encoded, auto-converted via `D1LargeBinary` |
 
 ## Error Handling
 
