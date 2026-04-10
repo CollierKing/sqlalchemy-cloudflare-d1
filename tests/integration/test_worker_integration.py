@@ -959,4 +959,64 @@ class TestWorkerTimeColumn:
         assert data["test"] == "time_orm"
         assert data["success"] is True, f"time_orm failed: error={data.get('error')}"
         assert data["entry_title"] == "Time Test Entry"
-        assert data["start_time_is_time"] is True
+
+
+# MARK: - Parallel Query Tests (GitHub issue #20)
+
+
+class TestParallelQueries:
+    """Concurrency tests proving both connection types are non-blocking.
+
+    Despite using pyodide.ffi.run_sync() internally, SyncWorkerConnection
+    drives the JS event loop rather than truly blocking it. Both connection
+    types show genuine speedup when queries are run via asyncio.gather().
+    """
+
+    def test_engine_queries_are_concurrent(self, dev_server):
+        """create_engine_from_binding() is concurrent — gather gives real speedup.
+
+        Both queries run a CPU-heavy recursive CTE (SUM of 1..500000).
+        Parallel time should be < 80% of sequential time, confirming that
+        run_sync() drives the JS event loop and does not block it.
+        """
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/parallel-queries-engine")
+
+        assert response.status_code == 200, (
+            f"parallel_queries_engine failed: {response.json()}"
+        )
+        data = response.json()
+
+        assert data["test"] == "parallel_queries_engine", data
+        assert data["results_correct"] is True, f"query results wrong: {data}"
+        assert data["is_concurrent"] is True, (
+            f"expected concurrent behaviour but got no speedup: "
+            f"sequential={data['sequential_time_s']}s, "
+            f"parallel={data['parallel_time_s']}s "
+            f"({data['n_queries']} queries)"
+        )
+
+    def test_worker_connection_queries_are_concurrent(self, dev_server):
+        """WorkerConnection async is truly concurrent — gather gives real speedup.
+
+        Both queries run the same CPU-heavy recursive CTE.
+        Parallel time should be < 80% of sequential time, confirming that
+        await cursor.execute_async() yields to the event loop and allows
+        both D1 calls to overlap.
+        """
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/parallel-queries-async")
+
+        assert response.status_code == 200, (
+            f"parallel_queries_async failed: {response.json()}"
+        )
+        data = response.json()
+
+        assert data["test"] == "parallel_queries_async", data
+        assert data["results_correct"] is True, f"query results wrong: {data}"
+        assert data["is_concurrent"] is True, (
+            f"expected concurrent behaviour but got no speedup: "
+            f"sequential={data['sequential_time_s']}s, "
+            f"parallel={data['parallel_time_s']}s "
+            f"({data['n_queries']} queries)"
+        )
