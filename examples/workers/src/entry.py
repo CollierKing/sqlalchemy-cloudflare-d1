@@ -145,6 +145,11 @@ class Default(WorkerEntrypoint):
             return await self.test_time_nullable()
         elif path == "time-orm":
             return await self.test_time_orm()
+        # Parallel query tests (GitHub issue #20)
+        elif path == "parallel-queries-engine":
+            return await self.test_parallel_queries_engine()
+        elif path == "parallel-queries-async":
+            return await self.test_parallel_queries_async()
         else:
             return await self.index()
 
@@ -206,6 +211,8 @@ class Default(WorkerEntrypoint):
                 "/time-basic": "Test Time column insert/retrieve",
                 "/time-nullable": "Test nullable Time columns",
                 "/time-orm": "Test Time via ORM session",
+                "/parallel-queries-engine": "Timing: create_engine_from_binding() blocks per query (sequential)",
+                "/parallel-queries-async": "Timing: WorkerConnection async is truly concurrent",
             },
             "package": "sqlalchemy-cloudflare-d1",
             "connection_type": "WorkerConnection (D1 binding)",
@@ -3628,6 +3635,129 @@ class Default(WorkerEntrypoint):
             return Response.json(
                 {
                     "test": "time_orm",
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                status=500,
+            )
+
+    # MARK: - Parallel Query Tests (GitHub issue #20)
+
+    async def test_parallel_queries_engine(self):
+        """Timing test showing create_engine_from_binding() queries run concurrently.
+
+        Although SyncWorkerConnection uses pyodide.ffi.run_sync() internally,
+        run_sync() drives the JS event loop rather than truly blocking it.
+        asyncio.gather() can therefore interleave multiple D1 round-trips.
+
+        Uses N unique parameterized queries (SELECT :n) so D1 cannot cache
+        results across runs. Sequential time = N * one_query_latency.
+        If concurrent, parallel time ≈ one_query_latency.
+        """
+        import asyncio
+        import time
+        from sqlalchemy import text
+
+        N_QUERIES = 10
+
+        try:
+            engine = self.get_engine()
+
+            async def single_query(i):
+                with engine.connect() as conn:
+                    result = conn.execute(text("SELECT :n as n"), {"n": i})
+                    return result.fetchone()[0]
+
+            seq_start = time.time()
+            for i in range(N_QUERIES):
+                await single_query(i)
+            sequential_time = time.time() - seq_start
+
+            par_start = time.time()
+            results = await asyncio.gather(*[single_query(i) for i in range(N_QUERIES)])
+            parallel_time = time.time() - par_start
+
+            results_correct = results == list(range(N_QUERIES))
+            # Expect genuine speedup — parallel < 80% of sequential
+            is_concurrent = parallel_time < sequential_time * 0.8
+
+            return Response.json(
+                {
+                    "test": "parallel_queries_engine",
+                    "success": results_correct and is_concurrent,
+                    "results_correct": results_correct,
+                    "is_concurrent": is_concurrent,
+                    "sequential_time_s": round(sequential_time, 3),
+                    "parallel_time_s": round(parallel_time, 3),
+                    "n_queries": N_QUERIES,
+                }
+            )
+        except Exception as e:
+            return Response.json(
+                {
+                    "test": "parallel_queries_engine",
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                status=500,
+            )
+
+    async def test_parallel_queries_async(self):
+        """Timing test showing WorkerConnection async queries are truly concurrent.
+
+        Instead of a CPU-bound CTE (which D1 serializes server-side regardless),
+        we run many lightweight round-trips where network latency is the bottleneck.
+        N_QUERIES simple SELECTs are fired sequentially then concurrently via
+        asyncio.gather(). If WorkerConnection truly yields to the event loop,
+        the parallel run should be faster because multiple D1 round-trips overlap.
+        """
+        import asyncio
+        import time
+
+        N_QUERIES = 10
+
+        try:
+
+            async def single_query(i):
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                await cursor.execute_async("SELECT ? as n", (i,))
+                row = cursor.fetchone()
+                conn.close()
+                return row[0]
+
+            # Sequential: N_QUERIES round-trips one after another
+            seq_start = time.time()
+            for i in range(N_QUERIES):
+                await single_query(i)
+            sequential_time = time.time() - seq_start
+
+            # Parallel: all N_QUERIES in flight at once
+            par_start = time.time()
+            results = await asyncio.gather(*[single_query(i) for i in range(N_QUERIES)])
+            parallel_time = time.time() - par_start
+
+            results_correct = results == list(range(N_QUERIES))
+            # Expect genuine speedup — parallel < 80% of sequential
+            is_concurrent = parallel_time < sequential_time * 0.8
+
+            return Response.json(
+                {
+                    "test": "parallel_queries_async",
+                    "success": results_correct and is_concurrent,
+                    "results_correct": results_correct,
+                    "is_concurrent": is_concurrent,
+                    "sequential_time_s": round(sequential_time, 3),
+                    "parallel_time_s": round(parallel_time, 3),
+                    "n_queries": N_QUERIES,
+                }
+            )
+        except Exception as e:
+            return Response.json(
+                {
+                    "test": "parallel_queries_async",
                     "success": False,
                     "error": str(e),
                     "error_type": type(e).__name__,
