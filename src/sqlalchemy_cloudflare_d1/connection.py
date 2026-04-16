@@ -6,6 +6,7 @@ Supports two connection modes:
 2. Worker Binding - for use inside Cloudflare Python Workers (d1_binding)
 """
 
+import os
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 try:
@@ -475,8 +476,14 @@ class Connection:
         self.database_id = database_id
         self.api_token = api_token
 
-        # Build the D1 REST API URL
-        self.base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}"
+        # Build the D1 REST API URL, allowing override via kwarg or CF_D1_BASE_URL env var
+        _default_base = (
+            f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+            f"/d1/database/{database_id}"
+        )
+        self.base_url = kwargs.get(
+            "base_url", os.environ.get("CF_D1_BASE_URL", _default_base)
+        )
 
         # HTTP client
         self.client = httpx.Client(
@@ -826,10 +833,13 @@ class AsyncConnection:
         self.database_id = database_id
         self.api_token = api_token
 
-        # Build the D1 REST API URL
-        self.base_url = (
+        # Build the D1 REST API URL, allowing override via kwarg or CF_D1_BASE_URL env var
+        _default_base = (
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
             f"/d1/database/{database_id}"
+        )
+        self.base_url = kwargs.get(
+            "base_url", os.environ.get("CF_D1_BASE_URL", _default_base)
         )
 
         # Async HTTP client
