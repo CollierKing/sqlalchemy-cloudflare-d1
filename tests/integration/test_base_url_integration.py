@@ -118,6 +118,22 @@ class TestBaseUrlOverride:
             finally:
                 conn.close()
 
+    def test_sqlalchemy_engine_with_connect_args(self, local_d1_server):
+        """Engine built with connect_args={'base_url': ...} routes to the local server."""
+        base_url, received = local_d1_server
+        engine = create_engine(
+            "cloudflare_d1://fake_account:fake_token@fake_db",
+            connect_args={"base_url": base_url},
+        )
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT 1 AS value"))
+                row = result.fetchone()
+            assert row == (42,)
+            assert any("/raw" in path for path in received)
+        finally:
+            engine.dispose()
+
     def test_sqlalchemy_engine_with_base_url_query_param(self, local_d1_server):
         """Engine built from a URL with ?base_url= routes requests to the local server."""
         base_url, received = local_d1_server
