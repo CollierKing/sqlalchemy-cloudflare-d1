@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.9]
+
+### Added
+
+- Configurable base API URL for local D1 proxy support ([#22](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/22))
+  - `Connection` and `AsyncConnection` now accept a `base_url` kwarg to override the Cloudflare endpoint
+  - Falls back to the `CF_D1_BASE_URL` environment variable, then the default Cloudflare URL
+  - Works with `create_engine(..., connect_args={"base_url": "http://localhost:8787"})` for the cleanest integration
+  - Enables local development against a `wrangler dev` D1 proxy without modifying source code
+
+
 ## [0.3.8]
 
 ### Added
