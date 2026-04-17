@@ -234,5 +234,65 @@ def test_async_dbapi_module():
     assert hasattr(AsyncAdapt_d1_dbapi, "connect")
 
 
+def test_connection_base_url_kwarg():
+    """Test that Connection accepts a custom base_url kwarg."""
+    from unittest.mock import patch
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    with patch("sqlalchemy_cloudflare_d1.connection.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = None
+        conn = Connection(
+            account_id="acct",
+            database_id="db",
+            api_token="token",
+            base_url="http://localhost:8787",
+        )
+        assert conn.base_url == "http://localhost:8787"
+
+
+def test_connection_base_url_env_var():
+    """Test that Connection reads CF_D1_BASE_URL from the environment."""
+    import os
+    from unittest.mock import patch
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    with patch.dict(os.environ, {"CF_D1_BASE_URL": "http://localhost:9999"}):
+        with patch("sqlalchemy_cloudflare_d1.connection.httpx") as mock_httpx:
+            mock_httpx.Client.return_value = None
+            conn = Connection(account_id="acct", database_id="db", api_token="token")
+            assert conn.base_url == "http://localhost:9999"
+
+
+def test_connection_base_url_default():
+    """Test that Connection falls back to the Cloudflare URL when no override is set."""
+    import os
+    from unittest.mock import patch
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    env = {k: v for k, v in os.environ.items() if k != "CF_D1_BASE_URL"}
+    with patch.dict(os.environ, env, clear=True):
+        with patch("sqlalchemy_cloudflare_d1.connection.httpx") as mock_httpx:
+            mock_httpx.Client.return_value = None
+            conn = Connection(account_id="acct", database_id="db", api_token="token")
+            assert conn.base_url == (
+                "https://api.cloudflare.com/client/v4/accounts/acct/d1/database/db"
+            )
+
+
+def test_base_url_passthrough_via_url_query():
+    """Test that base_url can be passed via the connection string query params."""
+    from sqlalchemy.engine.url import make_url
+
+    dialect = CloudflareD1Dialect()
+    url = make_url(
+        "cloudflare_d1://acct:token@db?base_url=http%3A%2F%2Flocalhost%3A8787"
+    )
+    _, kwargs = dialect.create_connect_args(url)
+    assert kwargs["base_url"] == "http://localhost:8787"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
