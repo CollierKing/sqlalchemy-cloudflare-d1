@@ -961,6 +961,133 @@ class TestWorkerTimeColumn:
         assert data["entry_title"] == "Time Test Entry"
 
 
+# MARK: - UUID Tests (GitHub issue #24)
+
+
+class TestWorkerUUIDColumn:
+    """Test UUID column handling via Worker endpoints."""
+
+    def test_uuid_insert_and_retrieve(self, dev_server):
+        """Test UUID column insert and retrieve."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/uuid-basic")
+
+        assert response.status_code == 200, f"uuid_basic failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "uuid_basic"
+        assert data["success"] is True, f"uuid_basic failed: error={data.get('error')}"
+        assert data["uuid_type"] == "UUID"
+        assert data["uuid_match"] is True
+
+    def test_uuid_nullable(self, dev_server):
+        """Test nullable UUID columns handle NULL correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/uuid-nullable")
+
+        assert response.status_code == 200, f"uuid_nullable failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "uuid_nullable"
+        assert data["success"] is True, (
+            f"uuid_nullable failed: error={data.get('error')}"
+        )
+        assert data["with_uuid_is_uuid"] is True
+        assert data["no_uuid_is_none"] is True
+
+    def test_uuid_as_primary_key(self, dev_server):
+        """Test UUID used as primary key."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/uuid-pk")
+
+        assert response.status_code == 200, f"uuid_pk failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "uuid_pk"
+        assert data["success"] is True, f"uuid_pk failed: error={data.get('error')}"
+        assert data["pk_is_uuid"] is True
+        assert data["pk_match"] is True
+
+    def test_uuid_orm_session(self, dev_server):
+        """Test UUID via ORM session."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/uuid-orm")
+
+        assert response.status_code == 200, f"uuid_orm failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "uuid_orm"
+        assert data["success"] is True, f"uuid_orm failed: error={data.get('error')}"
+        assert data["entry_title"] == "UUID ORM Test"
+        assert data["uuid_is_uuid"] is True
+        assert data["uuid_match"] is True
+
+
+# MARK: - Enum Tests (GitHub issue #24)
+
+
+class TestWorkerEnumColumn:
+    """Test Enum column handling via Worker endpoints."""
+
+    def test_enum_string_values(self, dev_server):
+        """Test Enum with string values insert and retrieve."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/enum-basic")
+
+        assert response.status_code == 200, f"enum_basic failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "enum_basic"
+        assert data["success"] is True, f"enum_basic failed: error={data.get('error')}"
+        assert data["status_value"] == "active"
+
+    def test_enum_python_class(self, dev_server):
+        """Test Enum with Python enum.Enum class."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/enum-python-class")
+
+        assert response.status_code == 200, (
+            f"enum_python_class failed: {response.json()}"
+        )
+        data = response.json()
+
+        assert data["test"] == "enum_python_class"
+        assert data["success"] is True, (
+            f"enum_python_class failed: error={data.get('error')}"
+        )
+        assert data["status_is_enum"] is True
+        assert data["status_value"] == "active"
+
+    def test_enum_nullable(self, dev_server):
+        """Test nullable Enum columns handle NULL correctly."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/enum-nullable")
+
+        assert response.status_code == 200, f"enum_nullable failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "enum_nullable"
+        assert data["success"] is True, (
+            f"enum_nullable failed: error={data.get('error')}"
+        )
+        assert data["with_status_value"] == "active"
+        assert data["no_status_is_none"] is True
+
+    def test_enum_orm_session(self, dev_server):
+        """Test Enum via ORM session."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/enum-orm")
+
+        assert response.status_code == 200, f"enum_orm failed: {response.json()}"
+        data = response.json()
+
+        assert data["test"] == "enum_orm"
+        assert data["success"] is True, f"enum_orm failed: error={data.get('error')}"
+        assert data["entry_title"] == "Enum ORM Task"
+        assert data["priority_is_enum"] is True
+        assert data["priority_match"] is True
+
+
 # MARK: - Parallel Query Tests (GitHub issue #20)
 
 

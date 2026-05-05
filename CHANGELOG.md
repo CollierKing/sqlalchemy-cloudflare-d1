@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.10]
+
+### Added
+
+- `UUID` and `Enum` column type support ([#24](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/24))
+  - Added `D1UUID` type processor that converts `uuid.UUID` objects to hyphenated strings on bind and parses them back on result; supports UUID as primary key and nullable columns
+  - Added `D1Enum` type processor that converts Python `enum.Enum` objects to their string values on bind and reconstructs them on result; supports both string-value enums and Python enum classes
+  - Both types store as `TEXT` in D1 (SQLite-compatible)
+  - Works in both REST API and Worker modes
+
+
 ## [0.3.9]
 
 ### Added

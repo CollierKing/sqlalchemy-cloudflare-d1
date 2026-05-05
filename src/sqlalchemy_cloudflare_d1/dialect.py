@@ -3,6 +3,8 @@ SQLAlchemy dialect for Cloudflare D1.
 """
 
 import base64
+import enum as enum_module
+import uuid as uuid_module
 from datetime import date, datetime, time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -11,6 +13,7 @@ from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.sql.sqltypes import (
     Boolean,
     DateTime,
+    Enum,
     INTEGER,
     LargeBinary,
     NUMERIC,
@@ -18,6 +21,7 @@ from sqlalchemy.sql.sqltypes import (
     TEXT,
     Date,
     Time,
+    Uuid,
 )
 from sqlalchemy import text
 
@@ -88,7 +92,7 @@ class D1LargeBinary(LargeBinary):
                 return None
             if isinstance(value, bytes):
                 return base64.b64encode(value).decode("ascii")
-            return value
+            return value  # type: ignore[no-any-return]
 
         return process
 
@@ -109,7 +113,7 @@ class D1LargeBinary(LargeBinary):
                 except Exception:
                     # If not valid base64, return as encoded bytes
                     return value.encode("utf-8")
-            return value
+            return value  # type: ignore[no-any-return]
 
         return process
 
@@ -155,8 +159,8 @@ class D1Date(Date):
                 try:
                     return date.fromisoformat(value)
                 except ValueError:
-                    return value
-            return value
+                    return value  # type: ignore[return-value]
+            return value  # type: ignore[no-any-return]
 
         return process
 
@@ -202,8 +206,8 @@ class D1Time(Time):
                 try:
                     return time.fromisoformat(value)
                 except ValueError:
-                    return value
-            return value
+                    return value  # type: ignore[return-value]
+            return value  # type: ignore[no-any-return]
 
         return process
 
@@ -249,10 +253,83 @@ class D1DateTime(DateTime):
                 try:
                     return datetime.fromisoformat(value)
                 except ValueError:
+                    return value  # type: ignore[return-value]
+            return value  # type: ignore[no-any-return]
+
+        return process
+
+
+# MARK: - UUID Type Processor
+
+
+class D1UUID(Uuid):
+    """Custom UUID type for Cloudflare D1.
+
+    D1 stores UUIDs as TEXT. This processor converts uuid.UUID objects to
+    hyphenated string format on bind and parses them back to uuid.UUID on result.
+    """
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Any], Optional[str]]:
+        """Convert uuid.UUID to hyphenated string for D1."""
+
+        def process(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, uuid_module.UUID):
+                return str(value)
+            return str(value)
+
+        return process
+
+    def result_processor(self, dialect: Dialect, coltype: Any) -> Callable[[Any], Any]:
+        """Convert string from D1 back to uuid.UUID (or str if as_uuid=False)."""
+        as_uuid = self.as_uuid
+
+        def process(value: Any) -> Any:
+            if value is None:
+                return None
+            if isinstance(value, uuid_module.UUID):
+                return value if as_uuid else str(value)
+            if isinstance(value, str):
+                try:
+                    parsed = uuid_module.UUID(value)
+                    return parsed if as_uuid else value
+                except ValueError:
                     return value
             return value
 
         return process
+
+
+# MARK: - Enum Type Processor
+
+
+class D1Enum(Enum):
+    """Custom Enum type for Cloudflare D1.
+
+    D1 stores enum values as TEXT. This processor ensures Python enum.Enum
+    objects are converted to their string values on bind. Result processing
+    delegates to the parent Enum type for enum reconstruction.
+    """
+
+    def bind_processor(self, dialect: Dialect) -> Callable[[Any], Optional[str]]:
+        """Convert Python enum (or any value) to string for D1."""
+
+        def process(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, enum_module.Enum):
+                return str(value.value)
+            return str(value)
+
+        return process
+
+    def result_processor(
+        self, dialect: Dialect, coltype: Any
+    ) -> Optional[Callable[[Any], Any]]:
+        """Delegate enum reconstruction to parent Enum type."""
+        parent = super().result_processor(dialect, coltype)
+        return parent  # type: ignore[no-any-return]
 
 
 # MARK: - Dialect
@@ -292,8 +369,10 @@ class CloudflareD1Dialect(default.DefaultDialect):
         Boolean: D1Boolean,
         Date: D1Date,
         DateTime: D1DateTime,
+        Enum: D1Enum,
         LargeBinary: D1LargeBinary,
         Time: D1Time,
+        Uuid: D1UUID,
     }
 
     # Reserved words (SQLite keywords)
@@ -443,7 +522,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
 
         return (), opts
 
-    def get_isolation_level(self, connection: Any) -> Optional[str]:
+    def get_isolation_level(self, connection: Any) -> Optional[str]:  # type: ignore[override]
         """D1 doesn't support isolation levels."""
         return None
 
@@ -476,7 +555,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
         )
         return bool(result.fetchone())
 
-    def get_columns(
+    def get_columns(  # type: ignore[override]
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get column information for a table."""
@@ -518,7 +597,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
         else:
             return TEXT()  # Default to TEXT for unknown types
 
-    def get_pk_constraint(
+    def get_pk_constraint(  # type: ignore[override]
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> Dict[str, Any]:
         """Get primary key constraint information."""
@@ -530,7 +609,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
             "name": None,  # SQLite doesn't name PK constraints
         }
 
-    def get_foreign_keys(
+    def get_foreign_keys(  # type: ignore[override]
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get foreign key constraints."""
@@ -558,7 +637,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
 
         return list(fks.values())
 
-    def get_indexes(
+    def get_indexes(  # type: ignore[override]
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
         """Get index information."""

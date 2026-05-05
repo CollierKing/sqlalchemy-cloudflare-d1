@@ -17,7 +17,7 @@ Usage:
 """
 
 from collections import deque
-from typing import Any, Optional, Sequence
+from typing import Any, Iterator, List, NoReturn, Optional, Sequence, Type
 
 from sqlalchemy.engine import AdaptedConnection
 from sqlalchemy.pool import AsyncAdaptedQueuePool
@@ -62,13 +62,15 @@ class AsyncAdapt_d1_cursor:
         self.rowcount = -1
         self.lastrowid = None
         self.description = None
-        self._rows = deque()
+        self._rows: deque[Any] = deque()
 
-    def close(self):
+    def close(self) -> None:
         """Close the cursor - just clear local rows."""
         self._rows.clear()
 
-    def execute(self, operation: str, parameters: Optional[Sequence] = None):
+    def execute(
+        self, operation: str, parameters: Optional[Sequence] = None
+    ) -> "AsyncAdapt_d1_cursor":
         """Execute a database operation.
 
         Uses await_ to run async operations. Eagerly fetches all results
@@ -91,12 +93,12 @@ class AsyncAdapt_d1_cursor:
             if is_select:
                 # For SELECT statements, set description (may be empty list for no-column results)
                 # D1 returns [] for empty results since it can't know column names
-                self.description = _cursor.description if _cursor.description else []
+                self.description = _cursor.description if _cursor.description else []  # type: ignore[assignment]
                 self.lastrowid = None
                 self.rowcount = -1
                 # Eagerly fetch all results into local deque
                 rows = self.await_(_cursor.fetchall())
-                self._rows = deque(rows if rows else [])
+                self._rows = deque(rows if rows else [])  # type: ignore[assignment]
             else:
                 # For non-SELECT statements (INSERT, UPDATE, DELETE)
                 self.description = None
@@ -111,7 +113,9 @@ class AsyncAdapt_d1_cursor:
         except Exception as error:
             self._adapt_connection._handle_exception(error)
 
-    def executemany(self, operation: str, seq_of_parameters: Sequence[Sequence]):
+    def executemany(
+        self, operation: str, seq_of_parameters: Sequence[Sequence]
+    ) -> "AsyncAdapt_d1_cursor":
         """Execute operation multiple times."""
         try:
             _cursor = self.await_(self._connection.cursor())
@@ -124,38 +128,38 @@ class AsyncAdapt_d1_cursor:
         except Exception as error:
             self._adapt_connection._handle_exception(error)
 
-    def setinputsizes(self, *inputsizes):
+    def setinputsizes(self, *inputsizes: Any) -> None:
         """No-op for D1."""
         pass
 
-    def setoutputsize(self, size, column=None):
+    def setoutputsize(self, size: Any, column: Any = None) -> None:
         """No-op for D1."""
         pass
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         """Iterate over results from local deque."""
         while self._rows:
             yield self._rows.popleft()
 
-    def fetchone(self):
+    def fetchone(self) -> Optional[Any]:
         """Fetch next row from local deque."""
         if self._rows:
             return self._rows.popleft()
         return None
 
-    def fetchmany(self, size=None):
+    def fetchmany(self, size: Optional[int] = None) -> List[Any]:
         """Fetch multiple rows from local deque."""
         if size is None:
             size = self.arraysize
         return [self._rows.popleft() for _ in range(min(size, len(self._rows)))]
 
-    def fetchall(self):
+    def fetchall(self) -> List[Any]:
         """Fetch all remaining rows from local deque."""
         retval = list(self._rows)
         self._rows.clear()
         return retval
 
-    async def _async_soft_close(self):
+    async def _async_soft_close(self) -> None:
         """Async soft close for SQLAlchemy async result compatibility.
 
         This is called by SQLAlchemy after execute() completes but BEFORE
@@ -183,31 +187,31 @@ class AsyncAdapt_d1_connection(AdaptedConnection):
         self.dbapi = dbapi
         self._connection = connection
 
-    def cursor(self):
+    def cursor(self) -> AsyncAdapt_d1_cursor:
         """Create a cursor."""
         return AsyncAdapt_d1_cursor(self)
 
-    def execute(self, *args, **kw):
+    def execute(self, *args: Any, **kw: Any) -> AsyncAdapt_d1_cursor:
         """Execute directly on connection."""
         cursor = self.cursor()
         cursor.execute(*args, **kw)
         return cursor
 
-    def rollback(self):
+    def rollback(self) -> None:
         """Rollback transaction (no-op for D1)."""
         try:
             self.await_(self._connection.rollback())
         except Exception as error:
             self._handle_exception(error)
 
-    def commit(self):
+    def commit(self) -> None:
         """Commit transaction (no-op for D1)."""
         try:
             self.await_(self._connection.commit())
         except Exception as error:
             self._handle_exception(error)
 
-    def close(self):
+    def close(self) -> None:
         """Close the connection."""
         try:
             self.await_(self._connection.close())
@@ -215,11 +219,11 @@ class AsyncAdapt_d1_connection(AdaptedConnection):
             self._handle_exception(error)
 
     @property
-    def closed(self):
+    def closed(self) -> bool:
         """Check if connection is closed."""
-        return self._connection.closed
+        return self._connection.closed  # type: ignore[no-any-return]
 
-    def _handle_exception(self, error):
+    def _handle_exception(self, error: Exception) -> NoReturn:
         """Handle and re-raise exceptions appropriately."""
         if isinstance(
             error, (Error, InterfaceError, OperationalError, ProgrammingError)
@@ -255,19 +259,7 @@ class AsyncAdapt_d1_dbapi:
         NotSupportedError,
     )
 
-    # Make them class attributes
-    Error = Error
-    Warning = Warning
-    InterfaceError = InterfaceError
-    DatabaseError = DatabaseError
-    DataError = DataError
-    OperationalError = OperationalError
-    IntegrityError = IntegrityError
-    InternalError = InternalError
-    ProgrammingError = ProgrammingError
-    NotSupportedError = NotSupportedError
-
-    def connect(self, **kwargs) -> AsyncAdapt_d1_connection:
+    def connect(self, **kwargs: Any) -> AsyncAdapt_d1_connection:
         """Create an async-adapted connection.
 
         Creates the AsyncConnection and wraps it. The await_only call
@@ -297,7 +289,7 @@ class AsyncAdapt_d1_dbapi:
 _dbapi_singleton = None
 
 
-def _get_dbapi():
+def _get_dbapi() -> "AsyncAdapt_d1_dbapi":
     """Get or create the DBAPI singleton."""
     global _dbapi_singleton
     if _dbapi_singleton is None:
@@ -327,15 +319,15 @@ class CloudflareD1Dialect_async(CloudflareD1Dialect):
         return _get_dbapi()
 
     @classmethod
-    def get_pool_class(cls, url):
+    def get_pool_class(cls, url: Any) -> Type[AsyncAdaptedQueuePool]:
         """Return the async pool class."""
         return AsyncAdaptedQueuePool
 
-    def get_driver_connection(self, connection):
+    def get_driver_connection(self, connection: Any) -> Any:
         """Get the underlying driver connection."""
         return connection._connection
 
-    def is_disconnect(self, e, connection, cursor):
+    def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
         """Check if exception indicates a disconnected state."""
         if isinstance(e, OperationalError):
             msg = str(e).lower()

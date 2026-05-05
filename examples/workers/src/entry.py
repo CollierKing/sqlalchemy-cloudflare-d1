@@ -145,6 +145,24 @@ class Default(WorkerEntrypoint):
             return await self.test_time_nullable()
         elif path == "time-orm":
             return await self.test_time_orm()
+        # UUID tests (GitHub issue #24)
+        elif path == "uuid-basic":
+            return await self.test_uuid_basic()
+        elif path == "uuid-nullable":
+            return await self.test_uuid_nullable()
+        elif path == "uuid-orm":
+            return await self.test_uuid_orm()
+        # Enum tests (GitHub issue #24)
+        elif path == "enum-basic":
+            return await self.test_enum_basic()
+        elif path == "enum-python-class":
+            return await self.test_enum_python_class()
+        elif path == "enum-nullable":
+            return await self.test_enum_nullable()
+        elif path == "enum-orm":
+            return await self.test_enum_orm()
+        elif path == "uuid-pk":
+            return await self.test_uuid_pk()
         # Parallel query tests (GitHub issue #20)
         elif path == "parallel-queries-engine":
             return await self.test_parallel_queries_engine()
@@ -3639,6 +3657,487 @@ class Default(WorkerEntrypoint):
                     "error": str(e),
                     "error_type": type(e).__name__,
                 },
+                status=500,
+            )
+
+    # MARK: - UUID Tests (GitHub issue #24)
+
+    async def test_uuid_basic(self):
+        """Test UUID column insert and retrieve."""
+        import uuid as uuid_module
+        from sqlalchemy import Column, Integer, MetaData, String, Table, Uuid, select
+
+        table_name = f"test_uuid_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("item_uuid", Uuid(as_uuid=True)),
+            )
+
+            metadata.create_all(engine)
+
+            test_uuid = uuid_module.uuid4()
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", item_uuid=test_uuid)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.item_uuid)
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = (
+                row is not None
+                and row[0] == "Test"
+                and isinstance(row[1], uuid_module.UUID)
+                and row[1] == test_uuid
+            )
+
+            return Response.json(
+                {
+                    "test": "uuid_basic",
+                    "success": success,
+                    "uuid_type": type(row[1]).__name__ if row else None,
+                    "uuid_match": row[1] == test_uuid if row else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "uuid_basic", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_uuid_nullable(self):
+        """Test nullable UUID columns handle NULL correctly."""
+        import uuid as uuid_module
+        from sqlalchemy import Column, Integer, MetaData, String, Table, Uuid, select
+
+        table_name = f"test_uuid_null_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("item_uuid", Uuid(as_uuid=True), nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        title="With UUID", item_uuid=uuid_module.uuid4()
+                    )
+                )
+                conn.execute(
+                    test_table.insert().values(title="No UUID", item_uuid=None)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.item_uuid).order_by(
+                        test_table.c.id
+                    )
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = (
+                len(rows) == 2
+                and isinstance(rows[0][1], uuid_module.UUID)
+                and rows[1][1] is None
+            )
+
+            return Response.json(
+                {
+                    "test": "uuid_nullable",
+                    "success": success,
+                    "with_uuid_is_uuid": isinstance(rows[0][1], uuid_module.UUID)
+                    if rows
+                    else False,
+                    "no_uuid_is_none": rows[1][1] is None if len(rows) > 1 else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "uuid_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_uuid_orm(self):
+        """Test UUID via ORM session."""
+        import uuid as uuid_module
+        from sqlalchemy import Integer, String, Uuid
+        from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+        engine = create_engine_from_binding(self.env.DB)
+        table_name = f"test_uuid_orm_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+
+            class Base(DeclarativeBase):
+                pass
+
+            class Item(Base):
+                __tablename__ = table_name
+                id: Mapped[int] = mapped_column(Integer, primary_key=True)
+                title: Mapped[str] = mapped_column(String(127))
+                item_uuid: Mapped[uuid_module.UUID] = mapped_column(Uuid(as_uuid=True))
+
+            Base.metadata.create_all(engine)
+
+            test_uuid = uuid_module.uuid4()
+
+            with Session(engine) as session:
+                item = Item(title="UUID ORM Test", item_uuid=test_uuid)
+                session.add(item)
+                session.commit()
+                session.refresh(item)
+                entry_title = item.title
+                uuid_is_uuid = isinstance(item.item_uuid, uuid_module.UUID)
+                uuid_match = item.item_uuid == test_uuid
+
+            Base.metadata.drop_all(engine)
+
+            return Response.json(
+                {
+                    "test": "uuid_orm",
+                    "success": uuid_is_uuid and uuid_match,
+                    "entry_title": entry_title,
+                    "uuid_is_uuid": uuid_is_uuid,
+                    "uuid_match": uuid_match,
+                }
+            )
+        except Exception as e:
+            try:
+                from sqlalchemy import MetaData, Table
+
+                md = MetaData()
+                Table(table_name, md)
+                md.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "uuid_orm", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_uuid_pk(self):
+        """Test UUID used as primary key."""
+        import uuid as uuid_module
+        from sqlalchemy import Column, MetaData, String, Table, Uuid, select
+
+        table_name = f"test_uuid_pk_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Uuid(as_uuid=True), primary_key=True),
+                Column("title", String(127)),
+            )
+
+            metadata.create_all(engine)
+
+            pk_uuid = uuid_module.uuid4()
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(id=pk_uuid, title="PK Test"))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table).where(test_table.c.id == pk_uuid)
+                )
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = (
+                row is not None
+                and isinstance(row[0], uuid_module.UUID)
+                and row[0] == pk_uuid
+                and row[1] == "PK Test"
+            )
+
+            return Response.json(
+                {
+                    "test": "uuid_pk",
+                    "success": success,
+                    "pk_is_uuid": isinstance(row[0], uuid_module.UUID)
+                    if row
+                    else False,
+                    "pk_match": row[0] == pk_uuid if row else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "uuid_pk", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    # MARK: - Enum Tests (GitHub issue #24)
+
+    async def test_enum_basic(self):
+        """Test Enum column with string values insert and retrieve."""
+        import uuid as uuid_module
+        from sqlalchemy import Column, Enum, Integer, MetaData, String, Table, select
+
+        table_name = f"test_enum_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("status", Enum("active", "inactive", "pending")),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(test_table.insert().values(title="Test", status="active"))
+                conn.commit()
+
+                result = conn.execute(select(test_table.c.title, test_table.c.status))
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = row is not None and row[0] == "Test" and row[1] == "active"
+
+            return Response.json(
+                {
+                    "test": "enum_basic",
+                    "success": success,
+                    "status_value": row[1] if row else None,
+                    "status_type": type(row[1]).__name__ if row else None,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "enum_basic", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_enum_python_class(self):
+        """Test Enum column with Python enum.Enum class."""
+        import enum as enum_module
+        import uuid as uuid_module
+        from sqlalchemy import Column, Enum, Integer, MetaData, String, Table, select
+
+        class Status(enum_module.Enum):
+            active = "active"
+            inactive = "inactive"
+            pending = "pending"
+
+        table_name = f"test_enum_cls_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("status", Enum(Status)),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", status=Status.active)
+                )
+                conn.commit()
+
+                result = conn.execute(select(test_table.c.title, test_table.c.status))
+                row = result.fetchone()
+
+            metadata.drop_all(engine)
+
+            success = row is not None and row[0] == "Test" and row[1] == Status.active
+
+            return Response.json(
+                {
+                    "test": "enum_python_class",
+                    "success": success,
+                    "status_is_enum": isinstance(row[1], Status) if row else False,
+                    "status_value": row[1].value
+                    if row and isinstance(row[1], Status)
+                    else str(row[1])
+                    if row
+                    else None,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "enum_python_class", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_enum_nullable(self):
+        """Test nullable Enum columns handle NULL correctly."""
+        import uuid as uuid_module
+        from sqlalchemy import Column, Enum, Integer, MetaData, String, Table, select
+
+        table_name = f"test_enum_null_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("title", String(127)),
+                Column("status", Enum("active", "inactive"), nullable=True),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="With Status", status="active")
+                )
+                conn.execute(test_table.insert().values(title="No Status", status=None))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.status).order_by(
+                        test_table.c.id
+                    )
+                )
+                rows = result.fetchall()
+
+            metadata.drop_all(engine)
+
+            success = len(rows) == 2 and rows[0][1] == "active" and rows[1][1] is None
+
+            return Response.json(
+                {
+                    "test": "enum_nullable",
+                    "success": success,
+                    "with_status_value": rows[0][1] if rows else None,
+                    "no_status_is_none": rows[1][1] is None if len(rows) > 1 else False,
+                }
+            )
+        except Exception as e:
+            try:
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "enum_nullable", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_enum_orm(self):
+        """Test Enum via ORM session with Python enum class."""
+        import enum as enum_module
+        import uuid as uuid_module
+        from sqlalchemy import Enum, Integer, String
+        from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+        class Priority(enum_module.Enum):
+            low = "low"
+            medium = "medium"
+            high = "high"
+
+        engine = create_engine_from_binding(self.env.DB)
+        table_name = f"test_enum_orm_{uuid_module.uuid4().hex[:8]}"
+
+        try:
+
+            class Base(DeclarativeBase):
+                pass
+
+            class Task(Base):
+                __tablename__ = table_name
+                id: Mapped[int] = mapped_column(Integer, primary_key=True)
+                title: Mapped[str] = mapped_column(String(127))
+                priority: Mapped[Priority] = mapped_column(Enum(Priority))
+
+            Base.metadata.create_all(engine)
+
+            with Session(engine) as session:
+                task = Task(title="Enum ORM Task", priority=Priority.high)
+                session.add(task)
+                session.commit()
+                session.refresh(task)
+                entry_title = task.title
+                priority_is_enum = isinstance(task.priority, Priority)
+                priority_match = task.priority == Priority.high
+
+            Base.metadata.drop_all(engine)
+
+            return Response.json(
+                {
+                    "test": "enum_orm",
+                    "success": priority_is_enum and priority_match,
+                    "entry_title": entry_title,
+                    "priority_is_enum": priority_is_enum,
+                    "priority_match": priority_match,
+                }
+            )
+        except Exception as e:
+            try:
+                from sqlalchemy import MetaData, Table
+
+                md = MetaData()
+                Table(table_name, md)
+                md.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "enum_orm", "success": False, "error": str(e)},
                 status=500,
             )
 
