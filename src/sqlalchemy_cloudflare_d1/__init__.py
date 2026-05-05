@@ -15,6 +15,8 @@ Async usage (requires greenlet: pip install sqlalchemy-cloudflare-d1[async]):
     engine = create_async_engine("cloudflare_d1+async://account_id:api_token@database_id")
 """
 
+from typing import Any
+
 from .dialect import CloudflareD1Dialect
 from .connection import (
     # Sync classes
@@ -47,7 +49,7 @@ from .connection import (
 )
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy import for async dialect to avoid requiring greenlet at import time.
 
     The async SQLAlchemy dialect (CloudflareD1Dialect_async) requires greenlet

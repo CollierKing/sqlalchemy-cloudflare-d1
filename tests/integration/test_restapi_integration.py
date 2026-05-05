@@ -3015,5 +3015,306 @@ class TestTimeColumn:
             metadata.drop_all(d1_engine)
 
 
+# MARK: - UUID Column Tests
+
+
+class TestUUIDColumn:
+    """Test UUID column handling.
+
+    D1 stores UUIDs as TEXT. The D1UUID type processor converts uuid.UUID
+    objects to hyphenated strings on bind and parses them back on result.
+    """
+
+    def test_uuid_insert_and_retrieve(self, d1_engine, test_table_name):
+        """Test that UUID columns can store and retrieve uuid.UUID values."""
+        import uuid as uuid_module
+        from sqlalchemy import Uuid
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("item_uuid", Uuid(as_uuid=True)),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            test_uuid = uuid_module.uuid4()
+
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", item_uuid=test_uuid)
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.item_uuid)
+                )
+                row = result.fetchone()
+
+            assert row is not None
+            assert row[0] == "Test"
+            assert isinstance(row[1], uuid_module.UUID)
+            assert row[1] == test_uuid
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_uuid_nullable(self, d1_engine, test_table_name):
+        """Test nullable UUID columns handle NULL correctly."""
+        import uuid as uuid_module
+        from sqlalchemy import Uuid
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("item_uuid", Uuid(as_uuid=True), nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="No UUID", item_uuid=None)
+                )
+                conn.execute(
+                    test_table.insert().values(
+                        title="With UUID", item_uuid=uuid_module.uuid4()
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table.c.title, test_table.c.item_uuid)
+                )
+                rows = result.fetchall()
+
+            assert len(rows) == 2
+            assert rows[0][1] is None
+            assert isinstance(rows[1][1], uuid_module.UUID)
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_uuid_as_primary_key(self, d1_engine, test_table_name):
+        """Test UUID used as primary key."""
+        import uuid as uuid_module
+        from sqlalchemy import Uuid
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Uuid(as_uuid=True), primary_key=True),
+            Column("title", String(127)),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            pk_uuid = uuid_module.uuid4()
+
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(id=pk_uuid, title="PK Test"))
+                conn.commit()
+
+                result = conn.execute(
+                    select(test_table).where(test_table.c.id == pk_uuid)
+                )
+                row = result.fetchone()
+
+            assert row is not None
+            assert isinstance(row[0], uuid_module.UUID)
+            assert row[0] == pk_uuid
+            assert row[1] == "PK Test"
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_uuid_orm_session(self, d1_engine):
+        """Test UUID via ORM session."""
+        import uuid as uuid_module
+        from sqlalchemy import Uuid
+        from sqlalchemy.orm import Mapped, Session, declarative_base, mapped_column
+
+        Base = declarative_base()
+
+        class Item(Base):
+            __tablename__ = f"items_{uuid_module.uuid4().hex[:8]}"
+
+            id: Mapped[int] = mapped_column(Integer, primary_key=True)
+            title: Mapped[str] = mapped_column(String(127))
+            item_uuid: Mapped[uuid_module.UUID] = mapped_column(Uuid(as_uuid=True))
+
+        Base.metadata.create_all(d1_engine)
+
+        try:
+            test_uuid = uuid_module.uuid4()
+
+            with Session(d1_engine) as session:
+                item = Item(title="ORM Test", item_uuid=test_uuid)
+                session.add(item)
+                session.commit()
+
+                retrieved = session.query(Item).first()
+
+                assert retrieved is not None
+                assert retrieved.title == "ORM Test"
+                assert isinstance(retrieved.item_uuid, uuid_module.UUID)
+                assert retrieved.item_uuid == test_uuid
+        finally:
+            Base.metadata.drop_all(d1_engine)
+
+
+# MARK: - Enum Column Tests
+
+
+class TestEnumColumn:
+    """Test Enum column handling.
+
+    D1 stores enum values as TEXT. The D1Enum type processor converts Python
+    enum.Enum objects to their string values on bind and reconstructs them on result.
+    """
+
+    def test_enum_string_values_insert_and_retrieve(self, d1_engine, test_table_name):
+        """Test Enum with string values (no Python enum class)."""
+        from sqlalchemy import Enum
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("status", Enum("active", "inactive", "pending")),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(title="Test", status="active"))
+                conn.commit()
+
+                result = conn.execute(select(test_table.c.title, test_table.c.status))
+                row = result.fetchone()
+
+            assert row is not None
+            assert row[0] == "Test"
+            assert row[1] == "active"
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_enum_python_enum_class(self, d1_engine, test_table_name):
+        """Test Enum with a Python enum.Enum class."""
+        import enum as enum_module
+        from sqlalchemy import Enum
+
+        class Status(enum_module.Enum):
+            active = "active"
+            inactive = "inactive"
+            pending = "pending"
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("status", Enum(Status)),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(title="Test", status=Status.active)
+                )
+                conn.commit()
+
+                result = conn.execute(select(test_table.c.title, test_table.c.status))
+                row = result.fetchone()
+
+            assert row is not None
+            assert row[0] == "Test"
+            assert row[1] == Status.active
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_enum_nullable(self, d1_engine, test_table_name):
+        """Test nullable Enum columns handle NULL correctly."""
+        from sqlalchemy import Enum
+
+        metadata = MetaData()
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("title", String(127)),
+            Column("status", Enum("active", "inactive"), nullable=True),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(test_table.insert().values(title="No Status", status=None))
+                conn.execute(
+                    test_table.insert().values(title="Active", status="active")
+                )
+                conn.commit()
+
+                result = conn.execute(select(test_table.c.title, test_table.c.status))
+                rows = result.fetchall()
+
+            assert len(rows) == 2
+            assert rows[0][1] is None
+            assert rows[1][1] == "active"
+        finally:
+            metadata.drop_all(d1_engine)
+
+    def test_enum_orm_session(self, d1_engine):
+        """Test Enum via ORM session with Python enum class."""
+        import enum as enum_module
+        import uuid as uuid_module
+        from sqlalchemy import Enum
+        from sqlalchemy.orm import Mapped, Session, declarative_base, mapped_column
+
+        class Priority(enum_module.Enum):
+            low = "low"
+            medium = "medium"
+            high = "high"
+
+        Base = declarative_base()
+
+        class Task(Base):
+            __tablename__ = f"tasks_{uuid_module.uuid4().hex[:8]}"
+
+            id: Mapped[int] = mapped_column(Integer, primary_key=True)
+            title: Mapped[str] = mapped_column(String(127))
+            priority: Mapped[Priority] = mapped_column(Enum(Priority))
+
+        Base.metadata.create_all(d1_engine)
+
+        try:
+            with Session(d1_engine) as session:
+                task = Task(title="ORM Task", priority=Priority.high)
+                session.add(task)
+                session.commit()
+
+                retrieved = session.query(Task).first()
+
+                assert retrieved is not None
+                assert retrieved.title == "ORM Task"
+                assert retrieved.priority == Priority.high
+        finally:
+            Base.metadata.drop_all(d1_engine)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

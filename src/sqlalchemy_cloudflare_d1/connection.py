@@ -7,7 +7,7 @@ Supports two connection modes:
 """
 
 import os
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 try:
     import httpx
@@ -243,33 +243,33 @@ class Row:
         else:
             raise TypeError("Key must be int or str")
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         """Iterate over values."""
         return iter(self._values)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Get number of columns."""
         return len(self._values)
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         """Check if row has data."""
         return bool(self._values)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation of the row."""
         return f"Row({dict(zip(self._keys, self._values))})"
 
-    def keys(self):
+    def keys(self) -> List[str]:
         """Get column names."""
         return self._keys
 
-    def values(self):
+    def values(self) -> List[Any]:
         """Get values."""
         return self._values
 
-    def items(self):
+    def items(self) -> Iterator[Tuple[str, Any]]:
         """Get (key, value) pairs."""
-        return zip(self._keys, self._values)
+        return zip(self._keys, self._values)  # type: ignore[return-value]
 
     # Add attribute access for compatibility
     def __getattr__(self, name: str) -> Any:
@@ -404,11 +404,11 @@ class BaseCursorMixin:
         """Get the ID of the last inserted row."""
         return self._last_result_meta.get("last_row_id")
 
-    def __iter__(self):
+    def __iter__(self) -> "BaseCursorMixin":
         """Make cursor iterable."""
         return self
 
-    def __next__(self):
+    def __next__(self) -> tuple:
         """Get next row for iteration."""
         row = self.fetchone()
         if row is None:
@@ -464,7 +464,9 @@ class Cursor(BaseCursorMixin):
 class Connection:
     """DBAPI-compatible connection for Cloudflare D1 REST API."""
 
-    def __init__(self, account_id: str, database_id: str, api_token: str, **kwargs):
+    def __init__(
+        self, account_id: str, database_id: str, api_token: str, **kwargs: Any
+    ) -> None:
         """Initialize D1 connection via REST API."""
         if not HTTPX_AVAILABLE:
             raise ImportError(
@@ -519,7 +521,7 @@ class Connection:
         # D1 doesn't support explicit transactions via REST API
         pass
 
-    def execute(self, operation: str, parameters: Optional[Sequence] = None):
+    def execute(self, operation: str, parameters: Optional[Sequence] = None) -> Cursor:
         """Execute operation directly on connection (convenience method)."""
         cursor = self.cursor()
         cursor.execute(operation, parameters)
@@ -778,7 +780,7 @@ class CloudflareD1DBAPI:
     NotSupportedError = NotSupportedError
 
     @staticmethod
-    def connect(**kwargs) -> Connection:
+    def connect(**kwargs: Any) -> Connection:
         """Create a new database connection."""
         return Connection(**kwargs)
 
@@ -801,7 +803,7 @@ threadsafety = CloudflareD1DBAPI.threadsafety
 paramstyle = CloudflareD1DBAPI.paramstyle
 
 
-def connect(**kwargs) -> Connection:
+def connect(**kwargs: Any) -> Connection:
     """Create a new database connection."""
     return CloudflareD1DBAPI.connect(**kwargs)
 
@@ -821,7 +823,9 @@ class AsyncConnection:
             rows = await cursor.fetchall()
     """
 
-    def __init__(self, account_id: str, database_id: str, api_token: str, **kwargs):
+    def __init__(
+        self, account_id: str, database_id: str, api_token: str, **kwargs: Any
+    ) -> None:
         """Initialize async D1 connection via REST API."""
         if not HTTPX_AVAILABLE:
             raise ImportError(
@@ -858,7 +862,7 @@ class AsyncConnection:
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.close()
 
@@ -975,7 +979,7 @@ class AsyncCursor(BaseCursorMixin):
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.close()
 
@@ -1052,7 +1056,7 @@ class AsyncCursor(BaseCursorMixin):
         BaseCursorMixin.close(self)
 
 
-async def connect_async(**kwargs) -> AsyncConnection:
+async def connect_async(**kwargs: Any) -> AsyncConnection:
     """Create a new async database connection."""
     return AsyncConnection(**kwargs)
 
@@ -1088,7 +1092,7 @@ class WorkerDBAPI:
         """Store the D1 binding for later use in connect()."""
         self._d1_binding = d1_binding
 
-    def connect(self, **kwargs) -> "SyncWorkerConnection":
+    def connect(self, **kwargs: Any) -> "SyncWorkerConnection":
         """Create a new database connection using the stored D1 binding."""
         return SyncWorkerConnection(self._d1_binding)
 
@@ -1153,15 +1157,15 @@ class SyncWorkerConnection:
         try:
             # Import pyodide to use run_sync for async operations
             # This is available in Cloudflare Python Workers
-            from pyodide.ffi import run_sync
+            from pyodide.ffi import run_sync  # type: ignore[import-not-found]
 
-            async def _run():
-                from js import JSON
+            async def _run() -> Dict[str, Any]:
+                from js import JSON  # type: ignore[import-not-found]
 
                 # Get a proper JS null value (not undefined)
                 JS_NULL = JSON.parse("null")
 
-                def convert_param(val):
+                def convert_param(val: Any) -> Any:
                     """Convert parameter for D1 binding, handling None -> null."""
                     if val is None:
                         return JS_NULL
@@ -1226,7 +1230,7 @@ class SyncWorkerConnection:
                     parsed["columns"] = fallback_columns
                 return parsed
 
-            return run_sync(_run())
+            return run_sync(_run())  # type: ignore[no-any-return]
 
         except ImportError:
             raise NotSupportedError(
@@ -1289,7 +1293,7 @@ class SyncWorkerCursor(BaseCursorMixin):
 # MARK: - Engine Factory
 
 
-def create_engine_from_binding(d1_binding: Any, **kwargs) -> Any:
+def create_engine_from_binding(d1_binding: Any, **kwargs: Any) -> Any:
     """Create a SQLAlchemy engine from a D1 Worker binding.
 
     This allows using SQLAlchemy Core and ORM patterns inside Cloudflare
