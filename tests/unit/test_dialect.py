@@ -176,6 +176,35 @@ def test_create_table_no_autoincrement_on_text():
     assert "AUTOINCREMENT" not in sql.upper(), f"Unexpected AUTOINCREMENT in: {sql}"
 
 
+def test_create_table_composite_primary_key():
+    """Test that a composite PRIMARY KEY emits exactly one constraint.
+
+    Regression: D1 rejects "more than one primary key" (SQLITE_ERROR). A
+    multi-column primary key must be rendered only as a table-level
+    PRIMARY KEY (...), never also inlined on the first column.
+    """
+    from sqlalchemy import Column, MetaData, String, Table
+    from sqlalchemy.schema import CreateTable
+
+    dialect = CloudflareD1Dialect()
+    metadata = MetaData()
+
+    test_table = Table(
+        "test_table",
+        metadata,
+        Column("tenant_id", String, primary_key=True),
+        Column("key", String, primary_key=True),
+        Column("value", String),
+    )
+
+    sql = str(CreateTable(test_table).compile(dialect=dialect))
+
+    pk_count = sql.upper().count("PRIMARY KEY")
+    assert pk_count == 1, f"Expected 1 PRIMARY KEY, found {pk_count} in: {sql}"
+    # The single constraint must be the table-level composite form.
+    assert "PRIMARY KEY (" in sql.upper(), f"composite PK not table-level in: {sql}"
+
+
 def test_async_dialect_import():
     """Test that the async dialect can be imported."""
     from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect_async
