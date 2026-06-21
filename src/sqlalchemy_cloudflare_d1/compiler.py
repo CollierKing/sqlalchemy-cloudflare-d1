@@ -157,10 +157,16 @@ class CloudflareD1DDLCompiler(SQLiteDDLCompiler):
         if not column.nullable:
             colspec += " NOT NULL"
 
-        # Only add PRIMARY KEY inline if first_pk=True
-        # This prevents duplicate PRIMARY KEY constraints
-        # (one inline, one as separate constraint)
-        if column.primary_key and first_pk:
+        # Only add PRIMARY KEY inline for a SINGLE-column primary key. A
+        # composite primary key is emitted at the table level (see
+        # create_table_constraints), so inlining it here as well would produce
+        # two PRIMARY KEY clauses, which D1 rejects ("more than one primary
+        # key": SQLITE_ERROR).
+        if (
+            column.primary_key
+            and first_pk
+            and len(column.table.primary_key.columns) == 1
+        ):
             colspec += " PRIMARY KEY"
 
         if column.computed is not None:
