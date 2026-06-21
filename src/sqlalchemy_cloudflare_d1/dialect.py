@@ -4,6 +4,7 @@ SQLAlchemy dialect for Cloudflare D1.
 
 import base64
 import enum as enum_module
+import re
 import uuid as uuid_module
 from datetime import date, datetime, time
 from typing import Any, Callable, Dict, List, Optional
@@ -627,6 +628,7 @@ class CloudflareD1Dialect(default.DefaultDialect):
                 fks[fk_id] = {
                     "name": None,
                     "constrained_columns": [],
+                    "referred_schema": schema,
                     "referred_table": row[2],
                     "referred_columns": [],
                     "options": {"onupdate": row[5], "ondelete": row[6]},
@@ -636,6 +638,42 @@ class CloudflareD1Dialect(default.DefaultDialect):
             fks[fk_id]["referred_columns"].append(row[4])
 
         return list(fks.values())
+
+    def get_unique_constraints(  # type: ignore[override]
+        self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
+    ) -> List[Dict[str, Any]]:
+        """Get unique constraint information."""
+        query = text(
+            f"PRAGMA index_list({self.identifier_preparer.quote_identifier(table_name)})"
+        )
+        result = connection.execute(query)
+
+        unique_constraints_by_sig: Dict[tuple[str, ...], Dict[str, Any]] = {}
+        for row in result:
+            # PRAGMA index_list returns: seq, name, unique, origin, partial
+            if not bool(row[2]):
+                continue
+
+            origin = row[3] if len(row) > 3 else None
+            if origin in {"c", "pk"}:
+                # Explicit unique indexes are reflected by get_indexes(); primary
+                # key autoindexes are reflected by get_pk_constraint().
+                continue
+
+            index_name = row[1]
+            column_names = self._get_index_column_names(connection, index_name)
+            unique_constraints_by_sig[tuple(column_names)] = {
+                "name": None,
+                "column_names": column_names,
+            }
+
+        table_sql = self._get_table_sql(connection, table_name)
+        for constraint_name, column_names in self._parse_unique_constraints(table_sql):
+            constraint = unique_constraints_by_sig.get(tuple(column_names))
+            if constraint is not None:
+                constraint["name"] = constraint_name
+
+        return list(unique_constraints_by_sig.values())
 
     def get_indexes(  # type: ignore[override]
         self, connection: Any, table_name: str, schema: Optional[str] = None, **kw: Any
@@ -647,22 +685,15 @@ class CloudflareD1Dialect(default.DefaultDialect):
         result = connection.execute(query)
 
         indexes = []
+        include_auto_indexes = kw.get("include_auto_indexes", False)
         for row in result:
             # PRAGMA index_list returns: seq, name, unique, origin, partial
             index_name = row[1]
-            if index_name.startswith("sqlite_autoindex_"):
+            if index_name.startswith("sqlite_autoindex_") and not include_auto_indexes:
                 continue  # Skip auto-generated indexes
 
             # Get column information for this index
-            col_query = text(
-                f"PRAGMA index_info({self.identifier_preparer.quote_identifier(index_name)})"
-            )
-            col_result = connection.execute(col_query)
-
-            column_names = []
-            for col_row in col_result:
-                # PRAGMA index_info returns: seqno, cid, name
-                column_names.append(col_row[2])
+            column_names = self._get_index_column_names(connection, index_name)
 
             indexes.append(
                 {
@@ -673,3 +704,63 @@ class CloudflareD1Dialect(default.DefaultDialect):
             )
 
         return indexes
+
+    def _get_index_column_names(self, connection: Any, index_name: str) -> List[str]:
+        """Get column names for an index."""
+        col_query = text(
+            f"PRAGMA index_info({self.identifier_preparer.quote_identifier(index_name)})"
+        )
+        col_result = connection.execute(col_query)
+
+        column_names = []
+        for col_row in col_result:
+            # PRAGMA index_info returns: seqno, cid, name
+            column_names.append(col_row[2])
+
+        return column_names
+
+    def _get_table_sql(self, connection: Any, table_name: str) -> Optional[str]:
+        """Get the CREATE TABLE SQL stored in sqlite_master."""
+        query = text("""
+            SELECT sql FROM sqlite_master
+            WHERE type='table' AND name=:table_name
+        """)
+        row = connection.execute(query, {"table_name": table_name}).fetchone()
+        return row[0] if row is not None else None
+
+    def _parse_unique_constraints(
+        self, table_sql: Optional[str]
+    ) -> List[tuple[Optional[str], List[str]]]:
+        """Parse unique constraint names and column lists from CREATE TABLE SQL."""
+        if table_sql is None:
+            return []
+
+        unique_constraints = []
+        unique_pattern = re.compile(
+            r'(?:CONSTRAINT\s+(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\w+))\s+)?'
+            r"UNIQUE\s*\(([^)]+)\)",
+            re.IGNORECASE,
+        )
+
+        for match in unique_pattern.finditer(table_sql):
+            constraint_name = next(
+                (group for group in match.group(1, 2, 3, 4) if group), None
+            )
+            column_names = self._parse_column_list(match.group(5))
+            unique_constraints.append((constraint_name, column_names))
+
+        return unique_constraints
+
+    def _parse_column_list(self, column_list_sql: str) -> List[str]:
+        """Parse a comma-separated identifier list."""
+        column_names = []
+        for raw_column in column_list_sql.split(","):
+            column = raw_column.strip()
+            if (
+                (column.startswith('"') and column.endswith('"'))
+                or (column.startswith("`") and column.endswith("`"))
+                or (column.startswith("[") and column.endswith("]"))
+            ):
+                column = column[1:-1]
+            column_names.append(column)
+        return column_names

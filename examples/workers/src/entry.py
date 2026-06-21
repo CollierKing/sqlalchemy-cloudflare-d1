@@ -45,6 +45,8 @@ class Default(WorkerEntrypoint):
             return await self.test_sqlalchemy_composite_pk()
         elif path == "sqlalchemy-reflect":
             return await self.test_sqlalchemy_reflect()
+        elif path == "sqlalchemy-reflect-constraints":
+            return await self.test_sqlalchemy_reflect_constraints()
         # Empty result set tests (GitHub issue #4)
         elif path == "empty-result":
             return await self.test_empty_result()
@@ -192,6 +194,7 @@ class Default(WorkerEntrypoint):
                 "/sqlalchemy-crud": "Test SQLAlchemy Core CRUD (no raw SQL)",
                 "/sqlalchemy-composite-pk": "Test SQLAlchemy composite primary key DDL",
                 "/sqlalchemy-reflect": "Test SQLAlchemy table reflection",
+                "/sqlalchemy-reflect-constraints": "Test SQLAlchemy constraint reflection",
                 "/empty-result": "Test empty result set description (issue #4)",
                 "/empty-result-sqlalchemy": "Test SQLAlchemy empty result (issue #4)",
                 "/json-filter": "Test filtering on JSON array columns",
@@ -698,6 +701,100 @@ class Default(WorkerEntrypoint):
                 pass
             return Response.json(
                 {"test": "sqlalchemy_reflect", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_sqlalchemy_reflect_constraints(self):
+        """Test SQLAlchemy foreign key and unique constraint reflection."""
+        parent_table_name = f"test_reflect_parent_{uuid.uuid4().hex[:8]}"
+        child_table_name = f"test_reflect_child_{uuid.uuid4().hex[:8]}"
+        unique_constraint_name = f"uq_{uuid.uuid4().hex[:12]}"
+
+        try:
+            from sqlalchemy import (
+                Column,
+                ForeignKey,
+                Integer,
+                MetaData,
+                String,
+                Table,
+                UniqueConstraint,
+                inspect,
+            )
+
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            Table(
+                parent_table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("slug", String, unique=True),
+            )
+            Table(
+                child_table_name,
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("parent_id", Integer, ForeignKey(f"{parent_table_name}.id")),
+                Column("tenant_id", String),
+                Column("record_key", String),
+                UniqueConstraint(
+                    "tenant_id",
+                    "record_key",
+                    name=unique_constraint_name,
+                ),
+            )
+
+            metadata.create_all(engine)
+
+            inspector = inspect(engine)
+            foreign_keys = inspector.get_foreign_keys(child_table_name)
+            unique_constraints = inspector.get_unique_constraints(child_table_name)
+            parent_unique_constraints = inspector.get_unique_constraints(
+                parent_table_name
+            )
+
+            metadata.drop_all(engine)
+
+            expected_child_unique = {
+                "name": unique_constraint_name,
+                "column_names": ["tenant_id", "record_key"],
+            }
+            expected_parent_unique = {"name": None, "column_names": ["slug"]}
+            foreign_key = foreign_keys[0] if foreign_keys else {}
+            success = (
+                foreign_key.get("constrained_columns") == ["parent_id"]
+                and foreign_key.get("referred_schema") is None
+                and foreign_key.get("referred_table") == parent_table_name
+                and foreign_key.get("referred_columns") == ["id"]
+                and expected_child_unique in unique_constraints
+                and expected_parent_unique in parent_unique_constraints
+            )
+
+            return Response.json(
+                {
+                    "test": "sqlalchemy_reflect_constraints",
+                    "success": success,
+                    "foreign_keys": foreign_keys,
+                    "unique_constraints": unique_constraints,
+                    "parent_unique_constraints": parent_unique_constraints,
+                }
+            )
+        except Exception as e:
+            try:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                await cursor.execute_async(f"DROP TABLE IF EXISTS {child_table_name}")
+                await cursor.execute_async(f"DROP TABLE IF EXISTS {parent_table_name}")
+                conn.close()
+            except Exception:
+                pass
+            return Response.json(
+                {
+                    "test": "sqlalchemy_reflect_constraints",
+                    "success": False,
+                    "error": str(e),
+                },
                 status=500,
             )
 

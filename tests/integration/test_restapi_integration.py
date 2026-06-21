@@ -457,6 +457,62 @@ class TestSQLAlchemyEngine:
         finally:
             metadata.drop_all(d1_engine)
 
+    def test_engine_reflects_foreign_keys_and_unique_constraints(
+        self, d1_engine, test_table_name
+    ):
+        """Test SQLAlchemy reflection for D1 foreign keys and unique constraints."""
+        from sqlalchemy import ForeignKey, UniqueConstraint, inspect
+
+        metadata = MetaData()
+        parent_table_name = f"{test_table_name}_parent"
+        child_table_name = f"{test_table_name}_child"
+        unique_constraint_name = f"uq_{test_table_name}_tenant_record"
+
+        Table(
+            parent_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("slug", String, unique=True),
+        )
+        Table(
+            child_table_name,
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("parent_id", Integer, ForeignKey(f"{parent_table_name}.id")),
+            Column("tenant_id", String),
+            Column("record_key", String),
+            UniqueConstraint(
+                "tenant_id",
+                "record_key",
+                name=unique_constraint_name,
+            ),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            inspector = inspect(d1_engine)
+            foreign_keys = inspector.get_foreign_keys(child_table_name)
+            unique_constraints = inspector.get_unique_constraints(child_table_name)
+            parent_unique_constraints = inspector.get_unique_constraints(
+                parent_table_name
+            )
+
+            assert foreign_keys
+            foreign_key = foreign_keys[0]
+            assert foreign_key["constrained_columns"] == ["parent_id"]
+            assert foreign_key["referred_schema"] is None
+            assert foreign_key["referred_table"] == parent_table_name
+            assert foreign_key["referred_columns"] == ["id"]
+
+            assert {
+                "name": unique_constraint_name,
+                "column_names": ["tenant_id", "record_key"],
+            } in unique_constraints
+            assert {"name": None, "column_names": ["slug"]} in parent_unique_constraints
+        finally:
+            metadata.drop_all(d1_engine)
+
     def test_engine_insert_and_select(self, d1_engine, test_table_name):
         """Test INSERT and SELECT using SQLAlchemy ORM-style."""
         metadata = MetaData()

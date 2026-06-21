@@ -205,6 +205,98 @@ def test_create_table_composite_primary_key():
     assert "PRIMARY KEY (" in sql.upper(), f"composite PK not table-level in: {sql}"
 
 
+def test_get_foreign_keys_includes_referred_schema():
+    """Test that foreign key reflection includes SQLAlchemy's schema key."""
+    from sqlalchemy import create_engine, text
+
+    dialect = CloudflareD1Dialect()
+    engine = create_engine("sqlite://")
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE parent (id INTEGER PRIMARY KEY)"))
+        conn.execute(
+            text("""
+                CREATE TABLE child (
+                    id INTEGER PRIMARY KEY,
+                    parent_id INTEGER,
+                    FOREIGN KEY (parent_id) REFERENCES parent(id)
+                )
+            """)
+        )
+
+        foreign_keys = dialect.get_foreign_keys(conn, "child")
+
+    assert foreign_keys == [
+        {
+            "name": None,
+            "constrained_columns": ["parent_id"],
+            "referred_schema": None,
+            "referred_table": "parent",
+            "referred_columns": ["id"],
+            "options": {"onupdate": "NO ACTION", "ondelete": "NO ACTION"},
+        }
+    ]
+
+
+def test_get_unique_constraints_reflects_inline_and_named_constraints():
+    """Test that unique constraint reflection returns SQLAlchemy's shape."""
+    from sqlalchemy import create_engine, text
+
+    dialect = CloudflareD1Dialect()
+    engine = create_engine("sqlite://")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                CREATE TABLE example (
+                    id INTEGER PRIMARY KEY,
+                    slug TEXT UNIQUE,
+                    tenant_id TEXT,
+                    record_key TEXT,
+                    CONSTRAINT uq_tenant_record UNIQUE (tenant_id, record_key)
+                )
+            """)
+        )
+
+        unique_constraints = dialect.get_unique_constraints(conn, "example")
+
+    assert unique_constraints == [
+        {"name": "uq_tenant_record", "column_names": ["tenant_id", "record_key"]},
+        {"name": None, "column_names": ["slug"]},
+    ]
+
+
+def test_get_unique_constraints_excludes_unique_indexes():
+    """Test that unique indexes stay in index reflection, not constraints."""
+    from sqlalchemy import create_engine, text
+
+    dialect = CloudflareD1Dialect()
+    engine = create_engine("sqlite://")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                CREATE TABLE example (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT
+                )
+            """)
+        )
+        conn.execute(text("CREATE UNIQUE INDEX ix_example_name ON example (name)"))
+
+        unique_constraints = dialect.get_unique_constraints(conn, "example")
+        indexes = dialect.get_indexes(conn, "example")
+
+    assert unique_constraints == []
+    assert indexes == [
+        {
+            "name": "ix_example_name",
+            "column_names": ["name"],
+            "unique": True,
+        }
+    ]
+
+
 def test_async_dialect_import():
     """Test that the async dialect can be imported."""
     from sqlalchemy_cloudflare_d1 import CloudflareD1Dialect_async
