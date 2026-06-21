@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.3.11]
+
+### Added
+
+- Added REST API and Worker integration coverage for composite primary key DDL and constraint reflection
+
+### Fixed
+
+- Fixed composite primary key DDL emitting duplicate `PRIMARY KEY` clauses, which D1 rejects with `SQLITE_ERROR`
+- Fixed foreign key reflection to include SQLAlchemy's expected `referred_schema` key
+- Implemented unique constraint reflection for D1 tables, including inline and named table-level unique constraints
+
+
 ## [0.3.10]
 
 ### Added

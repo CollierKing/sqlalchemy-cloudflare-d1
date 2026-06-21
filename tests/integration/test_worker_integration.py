@@ -213,6 +213,32 @@ class TestSQLAlchemyCore:
         assert "username" in column_names
         assert "email" in column_names
 
+    def test_sqlalchemy_reflect_constraints(self, dev_server):
+        """Test SQLAlchemy reflection for foreign keys and unique constraints."""
+        port = dev_server
+        response = requests.get(
+            f"http://localhost:{port}/sqlalchemy-reflect-constraints"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "sqlalchemy_reflect_constraints"
+        assert data["success"] is True
+
+        assert data["foreign_keys"]
+        foreign_key = data["foreign_keys"][0]
+        assert foreign_key["constrained_columns"] == ["parent_id"]
+        assert foreign_key["referred_schema"] is None
+        assert foreign_key["referred_columns"] == ["id"]
+
+        child_unique = data["unique_constraints"][0]
+        assert child_unique["column_names"] == ["tenant_id", "record_key"]
+        assert child_unique["name"] is not None
+        assert {"name": None, "column_names": ["slug"]} in data[
+            "parent_unique_constraints"
+        ]
+
 
 # MARK: - Empty Result Set Tests
 
