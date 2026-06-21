@@ -416,6 +416,47 @@ class TestSQLAlchemyEngine:
             # Clean up
             metadata.drop_all(d1_engine)
 
+    def test_engine_create_table_with_composite_primary_key(
+        self, d1_engine, test_table_name
+    ):
+        """Test creating and using a composite primary key table on D1."""
+        metadata = MetaData()
+
+        test_table = Table(
+            test_table_name,
+            metadata,
+            Column("tenant_id", String, primary_key=True),
+            Column("record_key", String, primary_key=True),
+            Column("value", String),
+        )
+
+        metadata.create_all(d1_engine)
+
+        try:
+            with d1_engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        tenant_id="tenant_a",
+                        record_key="label_a",
+                        value="value_a",
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(
+                        test_table.c.tenant_id,
+                        test_table.c.record_key,
+                        test_table.c.value,
+                    )
+                )
+                row = result.fetchone()
+
+            assert row is not None
+            assert tuple(row) == ("tenant_a", "label_a", "value_a")
+        finally:
+            metadata.drop_all(d1_engine)
+
     def test_engine_insert_and_select(self, d1_engine, test_table_name):
         """Test INSERT and SELECT using SQLAlchemy ORM-style."""
         metadata = MetaData()

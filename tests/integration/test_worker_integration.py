@@ -181,6 +181,19 @@ class TestSQLAlchemyCore:
         assert "name" in data["columns"]
         assert "value" in data["columns"]
 
+    def test_sqlalchemy_composite_primary_key(self, dev_server):
+        """Test SQLAlchemy creates a composite primary key table in Workers."""
+        port = dev_server
+        response = requests.get(f"http://localhost:{port}/sqlalchemy-composite-pk")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["test"] == "sqlalchemy_composite_pk"
+        assert data["success"] is True
+        assert data["row"] == ["tenant_a", "label_a", "value_a"]
+        assert data["columns"] == ["tenant_id", "record_key", "value"]
+
     def test_sqlalchemy_reflect(self, dev_server):
         """Test SQLAlchemy table reflection with autoload_with."""
         port = dev_server

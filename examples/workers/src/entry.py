@@ -41,6 +41,8 @@ class Default(WorkerEntrypoint):
             return await self.test_sqlalchemy_select()
         elif path == "sqlalchemy-crud":
             return await self.test_sqlalchemy_crud()
+        elif path == "sqlalchemy-composite-pk":
+            return await self.test_sqlalchemy_composite_pk()
         elif path == "sqlalchemy-reflect":
             return await self.test_sqlalchemy_reflect()
         # Empty result set tests (GitHub issue #4)
@@ -188,6 +190,7 @@ class Default(WorkerEntrypoint):
                 "/parameterized": "Test parameterized queries",
                 "/sqlalchemy-select": "Test SQLAlchemy Core SELECT (no raw SQL)",
                 "/sqlalchemy-crud": "Test SQLAlchemy Core CRUD (no raw SQL)",
+                "/sqlalchemy-composite-pk": "Test SQLAlchemy composite primary key DDL",
                 "/sqlalchemy-reflect": "Test SQLAlchemy table reflection",
                 "/empty-result": "Test empty result set description (issue #4)",
                 "/empty-result-sqlalchemy": "Test SQLAlchemy empty result (issue #4)",
@@ -545,6 +548,76 @@ class Default(WorkerEntrypoint):
                 pass
             return Response.json(
                 {"test": "sqlalchemy_crud", "success": False, "error": str(e)},
+                status=500,
+            )
+
+    async def test_sqlalchemy_composite_pk(self):
+        """Test SQLAlchemy composite primary key DDL against D1 binding."""
+        from sqlalchemy import Column, MetaData, String, Table, select
+
+        table_name = f"test_composite_pk_{uuid.uuid4().hex[:8]}"
+
+        try:
+            engine = self.get_engine()
+            metadata = MetaData()
+
+            test_table = Table(
+                table_name,
+                metadata,
+                Column("tenant_id", String, primary_key=True),
+                Column("record_key", String, primary_key=True),
+                Column("value", String),
+            )
+
+            metadata.create_all(engine)
+
+            with engine.connect() as conn:
+                conn.execute(
+                    test_table.insert().values(
+                        tenant_id="tenant_a",
+                        record_key="label_a",
+                        value="value_a",
+                    )
+                )
+                conn.commit()
+
+                result = conn.execute(
+                    select(
+                        test_table.c.tenant_id,
+                        test_table.c.record_key,
+                        test_table.c.value,
+                    )
+                )
+                row = result.fetchone()
+                columns = list(result.keys())
+
+            metadata.drop_all(engine)
+
+            success = row is not None and tuple(row) == (
+                "tenant_a",
+                "label_a",
+                "value_a",
+            )
+
+            return Response.json(
+                {
+                    "test": "sqlalchemy_composite_pk",
+                    "success": success,
+                    "table_name": table_name,
+                    "columns": columns,
+                    "row": list(row) if row is not None else None,
+                }
+            )
+        except Exception as e:
+            try:
+                engine = self.get_engine()
+                metadata = MetaData()
+                test_table = Table(table_name, metadata)
+                metadata.drop_all(engine)
+            except Exception:
+                pass
+            return Response.json(
+                {"test": "sqlalchemy_composite_pk", "success": False, "error": str(e)},
                 status=500,
             )
 
