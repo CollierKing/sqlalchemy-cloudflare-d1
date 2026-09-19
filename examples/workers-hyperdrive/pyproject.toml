@@ -1,0 +1,31 @@
+[project]
+name = "sqlalchemy-hyperdrive-worker"
+version = "0.1.0"
+description = "Example Python Worker using SQLAlchemy over Cloudflare Hyperdrive"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "webtypy>=0.1.7",
+    "pg8000>=1.30.0",
+    "sqlalchemy>=2.0.0",
+    "psycopg>=3.3.5",
+    "pymysql>=1.2.3",
+]
+
+# Note: sqlalchemy-cloudflare-d1 is deliberately NOT listed here. pywrangler
+# installs Worker dependencies with --no-build, so an editable local path has
+# no wheel to install and the sync fails. The package is copied straight into
+# python_modules instead -- see this directory's README.
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "requests>=2.31.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

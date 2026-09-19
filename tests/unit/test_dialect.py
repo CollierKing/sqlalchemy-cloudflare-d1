@@ -415,5 +415,24 @@ def test_base_url_passthrough_via_url_query():
     assert kwargs["base_url"] == "http://localhost:8787"
 
 
+def test_version_matches_package_metadata():
+    """Test that __version__ agrees with the installed distribution version.
+
+    pyproject derives its version from __version__, so these can only diverge
+    if the build config breaks. They silently drifted once before, with
+    __version__ stuck at 0.3.1 while the package shipped 0.3.11.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    import sqlalchemy_cloudflare_d1
+
+    try:
+        installed = version("sqlalchemy-cloudflare-d1")
+    except PackageNotFoundError:
+        pytest.skip("package not installed in this environment")
+
+    assert sqlalchemy_cloudflare_d1.__version__ == installed
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

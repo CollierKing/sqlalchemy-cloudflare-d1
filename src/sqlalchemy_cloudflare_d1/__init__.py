@@ -18,6 +18,10 @@ Async usage (requires greenlet: pip install sqlalchemy-cloudflare-d1[async]):
 from typing import Any
 
 from .dialect import CloudflareD1Dialect
+from .hyperdrive import (
+    create_engine_from_hyperdrive,
+    hyperdrive_connection,
+)
 from .connection import (
     # Sync classes
     Connection,
@@ -70,7 +74,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 __all__ = [
     # Dialects
     "CloudflareD1Dialect",
@@ -91,6 +95,9 @@ __all__ = [
     "SyncWorkerConnection",
     "SyncWorkerCursor",
     "create_engine_from_binding",
+    # Hyperdrive support (PostgreSQL/MySQL in Workers)
+    "create_engine_from_hyperdrive",
+    "hyperdrive_connection",
     # Exceptions
     "Error",
     "Warning",

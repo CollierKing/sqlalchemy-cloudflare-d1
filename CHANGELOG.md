@@ -13,6 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.4.0]
+
+### Added
+
+- Cloudflare Hyperdrive support for Python Workers
+  - `create_engine_from_hyperdrive()` builds a SQLAlchemy engine from a Hyperdrive binding, deriving the URL from the binding's connection fields
+  - `hyperdrive_connection()` yields a connection while holding an isolate-wide `asyncio.Lock`, since concurrent synchronous driver I/O is unsupported in Workers
+  - Driver is auto-detected from the binding's `scheme`, falling back to `connectionString`, and can be overridden with `driver=`
+  - Engines use `NullPool`: a Worker cannot reuse sockets across requests, and Hyperdrive pools server-side
+  - New `[hyperdrive]` extra installing `pg8000`, and `[hyperdrive-mysql]` installing `pymysql`, kept separate so a PostgreSQL deployment does not carry a MySQL driver
+  - A missing driver raises an error naming the extra that provides it, rather than a bare import error from inside SQLAlchemy
+  - `examples/workers-hyperdrive/` example Worker, verified both locally and deployed against a live Hyperdrive config
+- 6 Worker integration tests and 22 unit tests covering the Hyperdrive path
+
+### Notes
+
+- No custom dialect is involved. Hyperdrive speaks the PostgreSQL and MySQL wire protocols, so SQLAlchemy's own `postgresql+pg8000` and `mysql+pymysql` do the work; this package supplies only the binding-to-engine glue.
+- PostgreSQL via `pg8000` is the supported path. MySQL via `pymysql` is best effort — verified manually against MySQL 8, but with no automated coverage.
+- `psycopg` is not supported: psycopg3 requires libpq, which the Workers Pyodide build does not provide.
+- `asyncpg` and `aiomysql` cannot be used despite being Cloudflare's recommended drivers. They are async-only, and driving them from SQLAlchemy requires greenlet, which is unavailable in Python Workers. Only synchronous SQLAlchemy works.
+
+### Fixed
+
+- `__version__` in `sqlalchemy_cloudflare_d1` was stale at `0.3.1` while the package version had moved on; it now tracks the released version
+- The Hyperdrive I/O lock is created per event loop rather than at import. On Python 3.9 `asyncio.Lock()` binds to whichever loop is current when constructed, so a module-level lock raised "attached to a different loop" under any other loop
+
+
 ## [0.3.11]
 
 ### Added

@@ -8,6 +8,7 @@ import time
 import uuid
 from contextlib import closing
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
@@ -71,13 +72,14 @@ def find_free_port() -> int:
 
 
 def pywrangler_dev_server(
-    project_dir: Path, timeout: int = 300
+    project_dir: Path, timeout: int = 300, env: Optional[dict] = None
 ) -> tuple[subprocess.Popen, int]:
     """Start a pywrangler dev server and return the process and port.
 
     Args:
         project_dir: Path to the project directory containing wrangler.jsonc
         timeout: Maximum time to wait for server startup (default 300s for CI)
+        env: Extra environment variables for the server process
 
     Returns:
         Tuple of (process, port)
@@ -92,6 +94,7 @@ def pywrangler_dev_server(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env={**os.environ, **(env or {})},
     )
 
     # Wait for server to be ready
@@ -122,6 +125,11 @@ def pywrangler_dev_server(
 def get_worker_project_dir() -> Path:
     """Get the path to the examples/workers directory."""
     return Path(__file__).parent.parent / "examples" / "workers"
+
+
+def get_hyperdrive_project_dir() -> Path:
+    """Get the path to the examples/workers-hyperdrive directory."""
+    return Path(__file__).parent.parent / "examples" / "workers-hyperdrive"
 
 
 @pytest.fixture(scope="session")
@@ -168,6 +176,67 @@ def dev_server(initialized_worker):
                 process.wait()
 
             # Also kill any orphaned workerd processes on this port
+            try:
+                subprocess.run(
+                    ["pkill", "-f", f"workerd.*{port}"],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                pass
+
+
+@pytest.fixture(scope="session")
+def hyperdrive_dev_server():
+    """Session-scoped fixture that starts the Hyperdrive example Worker.
+
+    Hyperdrive has no local emulation: `wrangler dev` always connects to the
+    Postgres named by CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
+    rather than to the real Hyperdrive config. Tests are skipped unless that
+    variable is set.
+
+    The example table is created via /setup before the tests and dropped via
+    /teardown afterwards, so a run leaves the origin database as it found it.
+    A Hyperdrive config often points at a shared database.
+
+    Yields:
+        int: The port number the server is running on
+    """
+    import requests
+
+    conn_var = "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE"
+    if not os.environ.get(conn_var):
+        pytest.skip(f"{conn_var} not set (needs a reachable Postgres)")
+
+    project_dir = get_hyperdrive_project_dir()
+    sync_package_to_python_modules(project_dir)
+
+    process = None
+    port = None
+    try:
+        process, port = pywrangler_dev_server(
+            project_dir, env={conn_var: os.environ[conn_var]}
+        )
+
+        setup = requests.get(f"http://localhost:{port}/setup", timeout=120).json()
+        assert setup.get("success"), f"Hyperdrive /setup failed: {setup}"
+
+        yield port
+    finally:
+        if port is not None:
+            try:
+                requests.get(f"http://localhost:{port}/teardown", timeout=120)
+            except Exception:
+                pass
+
+        if process is not None:
+            try:
+                process.terminate()
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
             try:
                 subprocess.run(
                     ["pkill", "-f", f"workerd.*{port}"],

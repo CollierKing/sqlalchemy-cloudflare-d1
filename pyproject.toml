@@ -1,6 +1,8 @@
 [project]
 name = "sqlalchemy-cloudflare-d1"
-version = "0.3.11"
+# Single source of truth is __version__ in the package __init__, so the two
+# cannot drift apart. Bump it there.
+dynamic = ["version"]
 description = "A SQLAlchemy dialect for Cloudflare's D1 Serverless SQLite Database"
 readme = "README.md"
 authors = [
@@ -32,6 +34,12 @@ dependencies = [
 async = [
     "greenlet>=3.2.3",
 ]
+hyperdrive = [
+    "pg8000>=1.30.0",
+]
+hyperdrive-mysql = [
+    "pymysql>=1.1.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -53,6 +61,9 @@ cloudflare_d1 = "sqlalchemy_cloudflare_d1.dialect:CloudflareD1Dialect"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/sqlalchemy_cloudflare_d1/__init__.py"
 
 [tool.black]
 line-length = 88
@@ -86,6 +97,8 @@ dev = [
     "greenlet>=3.2.3",
     "mypy>=1.17.0",
     "pandas>=2.0.0",
+    "pg8000>=1.31.5",
+    "pymysql>=1.2.3",
     "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",
     "pytest-socket>=0.7.0",
