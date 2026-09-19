@@ -13,6 +13,7 @@ A SQLAlchemy dialect for [Cloudflare's D1 Serverless SQLite Database](https://de
 - Full SQLAlchemy ORM and Core support
 - **Sync and async engines** via D1 REST API (`create_engine` and `create_async_engine`)
 - **Python Workers support** with direct D1 binding (`create_engine_from_binding`)
+- **Cloudflare Hyperdrive support** for PostgreSQL/MySQL in Workers (`create_engine_from_hyperdrive`)
 - SQLite/D1 compatible SQL compilation
 - Prepared statement support with parameter binding
 - pandas `DataFrame.to_sql()` with upsert support
@@ -350,6 +351,74 @@ engine = create_engine(
     f"{os.getenv('CF_API_TOKEN')}@{os.getenv('CF_DATABASE_ID')}"
 )
 ```
+
+## Cloudflare Hyperdrive
+
+Hyperdrive fronts an existing PostgreSQL or MySQL database. It needs no custom
+dialect — SQLAlchemy's own `postgresql+pg8000` speaks the wire protocol — so
+this package supplies only the binding-to-engine glue for Python Workers.
+
+```bash
+pip install sqlalchemy-cloudflare-d1[hyperdrive]         # PostgreSQL (pg8000)
+pip install sqlalchemy-cloudflare-d1[hyperdrive-mysql]   # MySQL (pymysql)
+```
+
+The extras are separate so a PostgreSQL deployment does not carry a MySQL
+driver. Install the one matching your Hyperdrive origin — the driver must also
+be declared in your Worker's `pyproject.toml` dependencies.
+
+```python
+from sqlalchemy import MetaData, Table, select
+from sqlalchemy_cloudflare_d1.hyperdrive import (
+    create_engine_from_hyperdrive,
+    hyperdrive_connection,
+)
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        engine = create_engine_from_hyperdrive(self.env.HYPERDRIVE)
+
+        metadata = MetaData()
+        users = Table("users", metadata, autoload_with=engine)
+
+        async with hyperdrive_connection(engine) as conn:
+            rows = conn.execute(select(users).limit(10)).fetchall()
+```
+
+The driver is chosen from the binding's scheme and can be overridden with
+`driver=`. The engine uses `NullPool`, since a Worker cannot reuse sockets
+across requests and Hyperdrive pools server-side. `hyperdrive_connection()`
+holds an isolate-wide `asyncio.Lock`, because concurrent synchronous driver
+I/O is not supported.
+
+### Driver support
+
+Cloudflare documents five drivers as working in Python Workers. Only two can
+back a SQLAlchemy engine — verified from inside a Worker:
+
+| Driver | Status | Notes |
+|---|---|---|
+| `pg8000` | ✅ Supported | PostgreSQL. Covered by integration tests running in a Worker |
+| `pymysql` | ⚠️ Best effort | MySQL. Confirmed working in a Worker against MySQL 8, but that check was manual — there is **no automated test coverage**, so nothing guards against a regression |
+| `psycopg` | ❌ | Needs libpq, and the Workers Pyodide build has none (`no pq wrapper available`) |
+| `asyncpg` | ❌ | Async-only — see below |
+| `aiomysql` | ❌ | Async-only — see below |
+
+PostgreSQL via `pg8000` is the supported path. MySQL works but is not exercised
+by CI, so treat it as best effort.
+
+**Only synchronous SQLAlchemy works.** `asyncpg` and `aiomysql` run fine in
+Python Workers on their own — that is why Cloudflare recommends them — but
+driving them from SQLAlchemy means `create_async_engine()`, which requires
+greenlet, and greenlet is unavailable in Workers. So the two recommended
+drivers are precisely the two that cannot back a SQLAlchemy engine.
+
+Both supported drivers need TLS explicitly switched off, which
+`create_engine_from_hyperdrive()` handles: pg8000 gets `ssl_context=False` and
+pymysql gets `ssl_disabled=True`. Hyperdrive terminates TLS itself, and
+attempting it from inside a Worker corrupts the connection.
+
+See `examples/workers-hyperdrive/` for a complete Worker.
 
 ## Limitations
 

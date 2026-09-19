@@ -214,3 +214,6 @@ testing/
 node_modules/
 python_modules/
 .DS_Store
+
+# pywrangler generated lock for Worker examples
+pylock.toml

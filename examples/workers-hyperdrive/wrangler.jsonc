@@ -1,0 +1,20 @@
+{
+  "name": "sqlalchemy-hyperdrive-worker",
+  "main": "src/entry.py",
+  // Hyperdrive in Python Workers requires 2026-09-08 or later.
+  "compatibility_date": "2026-09-17",
+  "compatibility_flags": ["python_workers"],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "<HYPERDRIVE_CONFIG_ID>"
+      // Note: "remote": true is NOT valid on a hyperdrive binding. In
+      // `wrangler dev` the binding is always emulated against the Postgres in
+      // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE; the id above
+      // is what gets used once deployed.
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

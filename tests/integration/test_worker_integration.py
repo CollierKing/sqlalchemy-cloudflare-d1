@@ -1186,3 +1186,91 @@ class TestParallelQueries:
             f"parallel={data['parallel_time_s']}s "
             f"({data['n_queries']} queries)"
         )
+
+
+# MARK: - Hyperdrive Tests (PostgreSQL via Hyperdrive binding)
+
+
+class TestWorkerHyperdrive:
+    """Test SQLAlchemy over a Hyperdrive binding inside a Worker.
+
+    These run against the examples/workers-hyperdrive Worker, which uses the
+    stock postgresql+pg8000 dialect rather than the D1 dialect. They require a
+    live Hyperdrive origin, so they are gated behind TEST_HYPERDRIVE=1.
+    """
+
+    def test_hyperdrive_connection_health(self, hyperdrive_dev_server):
+        """Test that the Worker can open a Hyperdrive connection and query."""
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/health")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["test"] == "health"
+        assert data["success"] is True, data
+
+    def test_hyperdrive_engine_uses_pg8000_and_nullpool(self, hyperdrive_dev_server):
+        """Test that the binding resolves to the sync pg8000 dialect."""
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/driver")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["success"] is True, data
+        assert data["drivername"] == "postgresql+pg8000", data
+        assert data["poolclass"] == "NullPool", data
+
+    def test_hyperdrive_select(self, hyperdrive_dev_server):
+        """Test a SELECT through SQLAlchemy Core over Hyperdrive."""
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/select")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["success"] is True, data
+        assert len(data["rows"]) > 0, data
+        assert "name" in data["rows"][0], data
+
+    def test_hyperdrive_crud(self, hyperdrive_dev_server):
+        """Test insert/update/delete round-trip over Hyperdrive."""
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/crud")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["success"] is True, data
+        assert data["inserted_name"] == "worker-crud", data
+        assert data["updated_quantity"] == 42, data
+        assert data["deleted"] is True, data
+
+    def test_hyperdrive_reflection(self, hyperdrive_dev_server):
+        """Test that table reflection works through Hyperdrive."""
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/reflect")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["success"] is True, data
+        assert data["columns"] == ["id", "name", "quantity"], data
+        assert data["primary_key"] == ["id"], data
+
+    def test_hyperdrive_concurrent_queries_are_serialized(self, hyperdrive_dev_server):
+        """Test that overlapping queries complete correctly under the I/O lock.
+
+        Synchronous driver calls cannot interleave on the Workers socket layer,
+        so hyperdrive_connection() serializes them. Correct results from
+        asyncio.gather() confirm the lock holds.
+        """
+        port = hyperdrive_dev_server
+        response = requests.get(f"http://localhost:{port}/concurrent")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data["success"] is True, data
+        assert data["results"] == [1, 2, 3, 4, 5], data
