@@ -62,7 +62,13 @@ jobs:
         run: |
           set -eu
           pkg_name=$(grep '^name = ' pyproject.toml | sed 's/name = "\(.*\)"/\1/')
-          version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          # The version is dynamic: hatchling reads __version__ from the
+          # package, so there is no `version = ` line in pyproject to grep.
+          version=$(uv run python -c "import sqlalchemy_cloudflare_d1; print(sqlalchemy_cloudflare_d1.__version__)")
+          if [ -z "$version" ]; then
+            echo "::error::could not determine package version" >&2
+            exit 1
+          fi
           echo "pkg-name=$pkg_name" >> $GITHUB_OUTPUT
           echo "version=$version" >> $GITHUB_OUTPUT
 
