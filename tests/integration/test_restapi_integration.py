@@ -2452,6 +2452,75 @@ class TestSingleRowResult:
             cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 
+# MARK: - Columns With The Same Name Tests (Issue #31)
+
+
+class TestColumnsWithSameName:
+    """Test that columns sharing a name each keep their own value.
+
+    Regression tests for bug where every column with the same name
+    came back holding the value of the last one.
+    """
+
+    @pytest.fixture
+    def joined_tables(self, d1_connection):
+        """Create two tables that both have an id column."""
+        suffix = uuid.uuid4().hex[:8]
+        table_a = f"test_same_a_{suffix}"
+        table_b = f"test_same_b_{suffix}"
+        cursor = d1_connection.cursor()
+
+        cursor.execute(f"CREATE TABLE {table_a} (id INTEGER PRIMARY KEY, name TEXT)")
+        cursor.execute(f"CREATE TABLE {table_b} (id INTEGER PRIMARY KEY, a_id INTEGER)")
+        cursor.execute(f"INSERT INTO {table_a} (id, name) VALUES (1, 'x')")
+        cursor.execute(f"INSERT INTO {table_b} (id, a_id) VALUES (7, 1)")
+
+        try:
+            yield table_a, table_b
+        finally:
+            cursor.execute(f"DROP TABLE IF EXISTS {table_a}")
+            cursor.execute(f"DROP TABLE IF EXISTS {table_b}")
+
+    def test_join_via_cursor(self, d1_connection, joined_tables):
+        """Test a join selecting both id columns via DBAPI cursor."""
+        table_a, table_b = joined_tables
+        cursor = d1_connection.cursor()
+        cursor.execute(
+            f"SELECT {table_a}.id, {table_a}.name, {table_b}.id "
+            f"FROM {table_a} JOIN {table_b} ON {table_b}.a_id = {table_a}.id"
+        )
+
+        desc_names = [d[0] for d in cursor.description] if cursor.description else []
+        assert desc_names == ["id", "name", "id"]
+        assert cursor.fetchall() == [(1, "x", 7)]
+
+    def test_select_star_join_via_cursor(self, d1_connection, joined_tables):
+        """Test SELECT * over a join via DBAPI cursor."""
+        table_a, table_b = joined_tables
+        cursor = d1_connection.cursor()
+        cursor.execute(
+            f"SELECT * FROM {table_a} JOIN {table_b} ON {table_b}.a_id = {table_a}.id"
+        )
+
+        assert cursor.fetchall() == [(1, "x", 7, 1)]
+
+    def test_join_via_sqlalchemy(self, d1_engine, joined_tables):
+        """Test a join selecting both id columns via SQLAlchemy engine."""
+        from sqlalchemy import text
+
+        table_a, table_b = joined_tables
+        with d1_engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    f"SELECT {table_a}.id, {table_a}.name, {table_b}.id "
+                    f"FROM {table_a} JOIN {table_b} ON {table_b}.a_id = {table_a}.id"
+                )
+            )
+            rows = result.fetchall()
+
+        assert rows == [(1, "x", 7)]
+
+
 # MARK: - Autoincrement Insert Tests (Issue #12)
 
 
