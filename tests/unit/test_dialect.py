@@ -434,5 +434,132 @@ def test_version_matches_package_metadata():
     assert sqlalchemy_cloudflare_d1.__version__ == installed
 
 
+def _raw_transport(columns, rows):
+    """Build an httpx transport that answers every request like D1's /raw."""
+    import httpx
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "result": [
+                    {
+                        "results": {"columns": columns, "rows": rows},
+                        "meta": {},
+                        "success": True,
+                    }
+                ],
+            },
+        )
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "-- note\nSELECT 1 AS x, 2 AS y",
+        "/* note */ SELECT 1 AS x, 2 AS y",
+        "(SELECT 1 AS x, 2 AS y)",
+        "EXPLAIN QUERY PLAN SELECT 1 AS x, 2 AS y",
+        "VALUES (1, 2)",
+    ],
+)
+def test_description_uses_columns_for_any_statement(sql):
+    """Test that column names from D1 are used whatever the statement starts with."""
+    import httpx
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    conn = Connection(account_id="acct", database_id="db", api_token="token")
+    conn.client = httpx.Client(transport=_raw_transport(["x", "y"], [[1, 2]]))
+
+    cursor = conn.cursor()
+    cursor.execute(sql)
+
+    assert [d[0] for d in cursor.description] == ["x", "y"]
+    assert cursor.fetchall() == [(1, 2)]
+
+
+def test_description_none_without_columns():
+    """Test that a statement D1 sends no columns for still has no description."""
+    import httpx
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    conn = Connection(account_id="acct", database_id="db", api_token="token")
+    conn.client = httpx.Client(transport=_raw_transport([], []))
+
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO t (x) VALUES (1)")
+
+    assert cursor.description is None
+
+
+def test_description_empty_for_select_without_columns():
+    """Test that a SELECT with no columns and no rows keeps an empty description."""
+    import httpx
+
+    from sqlalchemy_cloudflare_d1.connection import Connection
+
+    conn = Connection(account_id="acct", database_id="db", api_token="token")
+    conn.client = httpx.Client(transport=_raw_transport([], []))
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM t")
+
+    assert cursor.description == []
+
+
+def test_engine_returns_rows_for_comment_led_select():
+    """Test that a SELECT with a leading comment returns rows through SQLAlchemy."""
+    import httpx
+    from sqlalchemy import create_engine, event, text
+
+    engine = create_engine("cloudflare_d1://acct:token@db")
+
+    @event.listens_for(engine, "connect")
+    def use_fake_raw(dbapi_connection, connection_record):
+        dbapi_connection.client = httpx.Client(
+            transport=_raw_transport(["x", "y"], [[1, 2]])
+        )
+
+    with engine.connect() as conn:
+        result = conn.execute(text("/* note */ SELECT 1 AS x, 2 AS y"))
+        assert list(result.keys()) == ["x", "y"]
+        assert result.fetchall() == [(1, 2)]
+
+
+def test_async_engine_returns_rows_for_comment_led_select():
+    """Test that a SELECT with a leading comment returns rows through the async engine."""
+    import asyncio
+
+    import httpx
+    from sqlalchemy import event, text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine("cloudflare_d1+async://acct:token@db")
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def use_fake_raw(dbapi_connection, connection_record):
+        dbapi_connection._connection.client = httpx.AsyncClient(
+            transport=_raw_transport(["x", "y"], [[1, 2]])
+        )
+
+    async def main():
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text("/* note */ SELECT 1 AS x, 2 AS y"))
+                return list(result.keys()), result.fetchall()
+        finally:
+            await engine.dispose()
+
+    keys, rows = asyncio.run(main())
+
+    assert keys == ["x", "y"]
+    assert rows == [(1, 2)]
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
