@@ -84,11 +84,9 @@ class AsyncAdapt_d1_cursor:
             self.await_(_cursor.execute(operation, parameters))
 
             # Determine if this is a row-returning statement
-            operation_upper = operation.strip().upper()
-            is_select = (
-                operation_upper.startswith(("SELECT", "PRAGMA", "WITH"))
-                or "RETURNING" in operation_upper
-            )
+            # The cursor sets a description when D1 sent column names or the
+            # statement is SELECT-like, and None otherwise
+            is_select = _cursor.description is not None
 
             if is_select:
                 # For SELECT statements, set description (may be empty list for no-column results)

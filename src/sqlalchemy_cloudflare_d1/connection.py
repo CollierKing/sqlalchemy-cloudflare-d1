@@ -106,14 +106,22 @@ def _build_description(
 ) -> Optional[List[tuple]]:
     """Build cursor description from query result.
 
+    Column names sent by D1 are used whatever the statement starts with, so
+    a leading comment, EXPLAIN or VALUES still gets a description.
+
     Args:
         operation: The SQL operation that was executed
         columns: Column names from the query result
         result_data: The result data rows
 
     Returns:
-        List of 7-tuples for SELECT-like statements, None otherwise
+        List of 7-tuples when D1 sent column names or the statement is
+        SELECT-like, None otherwise
     """
+    # Build description from columns
+    if columns:
+        return [(name, None, None, None, None, None, None) for name in columns]
+
     operation_upper = operation.strip().upper()
     is_select_like = (
         operation_upper.startswith(("SELECT", "PRAGMA", "WITH"))
@@ -123,10 +131,7 @@ def _build_description(
     if not is_select_like:
         return None
 
-    # Build description from columns
-    if columns:
-        return [(name, None, None, None, None, None, None) for name in columns]
-    elif result_data:
+    if result_data:
         # Fallback to first row keys if columns not available
         first_row = result_data[0]
         return [(name, None, None, None, None, None, None) for name in first_row.keys()]

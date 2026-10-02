@@ -3413,5 +3413,99 @@ class TestEnumColumn:
             Base.metadata.drop_all(d1_engine)
 
 
+# MARK: - Description Without SELECT Keyword Tests (Issue #32)
+
+
+class TestDescriptionWithoutSelectKeyword:
+    """Test that statements returning rows get a description whatever they start with.
+
+    Regression tests for bug where a leading comment, EXPLAIN or VALUES
+    returned rows with cursor.description set to None.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "-- note\nSELECT 1 AS x, 2 AS y",
+            "/* note */ SELECT 1 AS x, 2 AS y",
+        ],
+    )
+    def test_comment_led_select_via_cursor(self, d1_connection, sql):
+        """Test SELECT with a leading comment has a description via DBAPI cursor."""
+        cursor = d1_connection.cursor()
+        cursor.execute(sql)
+
+        desc_names = [d[0] for d in cursor.description] if cursor.description else []
+        assert desc_names == ["x", "y"]
+        assert cursor.fetchall() == [(1, 2)]
+
+    def test_values_via_cursor(self, d1_connection):
+        """Test VALUES has a description via DBAPI cursor."""
+        cursor = d1_connection.cursor()
+        cursor.execute("VALUES (1, 2)")
+
+        desc_names = [d[0] for d in cursor.description] if cursor.description else []
+        assert desc_names == ["column1", "column2"]
+        assert cursor.fetchall() == [(1, 2)]
+
+    def test_explain_query_plan_via_cursor(self, d1_connection):
+        """Test EXPLAIN QUERY PLAN has a description via DBAPI cursor."""
+        cursor = d1_connection.cursor()
+        cursor.execute("EXPLAIN QUERY PLAN SELECT 1")
+
+        desc_names = [d[0] for d in cursor.description] if cursor.description else []
+        assert "detail" in desc_names
+        assert len(cursor.fetchall()) >= 1
+
+    def test_insert_has_no_description(self, d1_connection, test_table_name):
+        """Test INSERT without RETURNING still has no description."""
+        cursor = d1_connection.cursor()
+
+        try:
+            cursor.execute(
+                f"CREATE TABLE IF NOT EXISTS {test_table_name} "
+                f"(id INTEGER PRIMARY KEY, name TEXT)"
+            )
+            assert cursor.description is None
+
+            cursor.execute(f"INSERT INTO {test_table_name} (name) VALUES (?)", ("a",))
+            assert cursor.description is None
+            assert cursor.rowcount == 1
+        finally:
+            cursor.execute(f"DROP TABLE IF EXISTS {test_table_name}")
+
+    def test_comment_led_select_via_sqlalchemy(self, d1_engine):
+        """Test SELECT with a leading comment returns rows via SQLAlchemy engine."""
+        from sqlalchemy import text
+
+        with d1_engine.connect() as conn:
+            result = conn.execute(text("/* note */ SELECT 1 AS x, 2 AS y"))
+            columns = list(result.keys())
+            rows = result.fetchall()
+
+        assert columns == ["x", "y"]
+        assert rows == [(1, 2)]
+
+    @pytest.mark.asyncio
+    async def test_comment_led_select_via_async_engine(self):
+        """Test SELECT with a leading comment returns rows via async engine."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        url = f"cloudflare_d1+async://{ACCOUNT_ID}:{API_TOKEN}@{DATABASE_ID}"
+        engine = create_async_engine(url)
+
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text("/* note */ SELECT 1 AS x, 2 AS y"))
+                columns = list(result.keys())
+                rows = result.fetchall()
+
+            assert columns == ["x", "y"]
+            assert rows == [(1, 2)]
+        finally:
+            await engine.dispose()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
