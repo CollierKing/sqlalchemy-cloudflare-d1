@@ -24,7 +24,9 @@ class Default(WorkerEntrypoint):
         path = url.split("/")[-1].split("?")[0] if "/" in url else ""
 
         # Core test endpoints (matching REST API tests)
-        if path == "select":
+        if path == "cursor-results":
+            return await self.test_cursor_results()
+        elif path == "select":
             return await self.test_select()
         elif path == "sqlite-master":
             return await self.test_sqlite_master()
@@ -174,6 +176,89 @@ class Default(WorkerEntrypoint):
             return await self.test_parallel_queries_async()
         else:
             return await self.index()
+
+    # MARK: - Cursor Result Regressions
+
+    async def test_cursor_results(self):
+        """Exercise production cursors and SQLAlchemy against the bound database."""
+        from sqlalchemy_cloudflare_d1.connection import SyncWorkerConnection
+
+        queries = [
+            "SELECT 1 AS id, 7 AS id",
+            "SELECT 1 AS id, NULL AS value, 7 AS id UNION ALL SELECT 2, 'x', 8",
+            "-- note\nSELECT 1 AS x WHERE 0",
+            "/* note */ SELECT 1 AS x WHERE 0",
+            'WITH "select" AS (SELECT 1 AS x) SELECT x FROM "select" WHERE 0',
+            "VALUES (1, 2)",
+            "EXPLAIN SELECT 1",
+        ]
+        output = {}
+        for mode in ("async", "sync"):
+            connection = (
+                WorkerConnection(self.env.DB)
+                if mode == "async"
+                else SyncWorkerConnection(self.env.DB)
+            )
+            cursor = connection.cursor()
+
+            async def execute(query, parameters=None):
+                if mode == "async":
+                    await cursor.execute_async(query, parameters)
+                else:
+                    cursor.execute(query, parameters)
+
+            try:
+                results = []
+                for query in queries:
+                    await execute(query)
+                    results.append(
+                        {
+                            "columns": [col[0] for col in cursor.description],
+                            "rows": cursor.fetchall(),
+                        }
+                    )
+                output[mode] = results
+                table = f"test_cursor_results_{uuid.uuid4().hex}"
+                await execute(
+                    f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, value TEXT)"
+                )
+                try:
+                    await execute(
+                        f"/* note */ WITH select2 AS (SELECT ? AS value) "
+                        f"INSERT INTO {table} (value) SELECT value FROM select2",
+                        ("inserted once",),
+                    )
+                    mutation = {
+                        "rowcount": cursor.rowcount,
+                        "lastrowid": cursor.lastrowid,
+                    }
+                    await execute(f"SELECT COUNT(*) FROM {table}")
+                    mutation["count"] = cursor.fetchone()[0]
+                    await execute(f"DELETE FROM {table}")
+                    mutation["deleted"] = cursor.rowcount
+                    output[f"{mode}_mutation"] = mutation
+                finally:
+                    await execute(f"DROP TABLE {table}")
+            finally:
+                cursor.close()
+                connection.close()
+
+        engine = create_engine_from_binding(self.env.DB)
+        try:
+            with engine.connect() as connection:
+                results = []
+                for query in queries:
+                    result = connection.exec_driver_sql(query)
+                    results.append(
+                        {
+                            "columns": list(result.keys()),
+                            "rows": [tuple(row) for row in result.fetchall()],
+                        }
+                    )
+                output["engine"] = results
+        finally:
+            engine.dispose()
+        return Response.json(output)
 
     def get_connection(self) -> WorkerConnection:
         """Get a WorkerConnection wrapping the D1 binding."""

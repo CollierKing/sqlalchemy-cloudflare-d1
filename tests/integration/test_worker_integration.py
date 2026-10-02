@@ -9,6 +9,7 @@ between the REST API and Worker binding approaches.
 Requires: pywrangler dev running with --local flag for local D1 database.
 """
 
+import pytest
 import requests
 
 
@@ -1274,3 +1275,50 @@ class TestWorkerHyperdrive:
 
         assert data["success"] is True, data
         assert data["results"] == [1, 2, 3, 4, 5], data
+
+
+# MARK: - Real D1 Cursor Result Regressions
+
+
+@pytest.mark.parametrize("dev_server", [True], indirect=True)
+class TestRemoteWorkerCursorResults:
+    """Use the example's real D1 binding for sync, async and SQLAlchemy results."""
+
+    @pytest.fixture(scope="class")
+    def cursor_results(self, dev_server):
+        response = requests.get(
+            f"http://localhost:{dev_server}/cursor-results", timeout=120
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    @pytest.mark.parametrize("mode", ["async", "sync", "engine"])
+    def test_duplicate_columns_and_nulls(self, cursor_results, mode):
+        results = cursor_results[mode]
+        assert results[0] == {"columns": ["id", "id"], "rows": [[1, 7]]}
+        assert results[1] == {
+            "columns": ["id", "value", "id"],
+            "rows": [[1, None, 7], [2, "x", 8]],
+        }
+
+    @pytest.mark.parametrize("mode", ["async", "sync", "engine"])
+    def test_empty_commented_and_cte_queries(self, cursor_results, mode):
+        for result in cursor_results[mode][2:5]:
+            assert result == {"columns": ["x"], "rows": []}
+
+    @pytest.mark.parametrize("mode", ["async", "sync", "engine"])
+    def test_values_and_explain(self, cursor_results, mode):
+        values, explain = cursor_results[mode][5:]
+        assert values == {"columns": ["column1", "column2"], "rows": [[1, 2]]}
+        assert explain["columns"][:3] == ["addr", "opcode", "p1"]
+        assert explain["rows"]
+        assert all(len(row) == len(explain["columns"]) for row in explain["rows"])
+
+    @pytest.mark.parametrize("mode", ["async", "sync"])
+    def test_mutation_metadata_and_single_execution(self, cursor_results, mode):
+        assert cursor_results[f"{mode}_mutation"] == {
+            "rowcount": 1,
+            "lastrowid": 1,
+            "count": 1,
+            "deleted": 1,
+        }

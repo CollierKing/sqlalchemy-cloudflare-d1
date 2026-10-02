@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 
+## [0.4.1]
+
+### Fixed
+
+- Preserve distinct positional values when multiple result columns share a name in synchronous and asynchronous REST connections ([#31](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/31)). Thanks to [@danielalyoshin](https://github.com/danielalyoshin) for [PR #34](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/pull/34).
+- Recognize row-returning statements from D1's column metadata, including commented SQL, `VALUES`, and `EXPLAIN`, and make the async SQLAlchemy adapter follow the cursor description ([#32](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/issues/32)). Thanks to [@danielalyoshin](https://github.com/danielalyoshin) for [PR #33](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/pull/33).
+- Extend positional read results to synchronous and asynchronous Worker bindings, preserving duplicate columns, NULLs, and empty-result column names. Use a native JavaScript options object for D1's `raw()` API; keep writes on `all()` to preserve affected-row counts and generated IDs, including `WITH`-prefixed inserts ([PR #37](https://github.com/CollierKing/sqlalchemy-cloudflare-d1/pull/37)).
+- Correct Worker test-server readiness detection and process cleanup, and honor remote D1 bindings for the new integration tests.
+
+### Added
+
+- Unit and real-D1 regression coverage for Worker cursor results and duplicate columns through SQLAlchemy's async REST engine.
+
+
 ## [0.4.0]
 
 ### Added

@@ -217,3 +217,5 @@ python_modules/
 
 # pywrangler generated lock for Worker examples
 pylock.toml
+
+/.codex/
