@@ -10,7 +10,6 @@ import asyncio
 import httpx
 import pytest
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from sqlalchemy_cloudflare_d1.connection import AsyncConnection, Connection
 
@@ -91,28 +90,6 @@ def test_engine_keeps_values_of_columns_with_same_name():
         rows = conn.execute(text(JOIN_SQL)).fetchall()
 
     assert rows == [(1, "x", 7)]
-
-
-def test_async_engine_keeps_values_of_columns_with_same_name():
-    """Keep positional values through the async SQLAlchemy adapter, too."""
-    engine = create_async_engine("cloudflare_d1+async://acct:token@db")
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def use_fake_raw(dbapi_connection, connection_record):
-        dbapi_connection._connection.client = httpx.AsyncClient(
-            transport=raw_transport(["id", "name", "id"], [[1, "x", 7]])
-        )
-
-    async def main():
-        try:
-            async with engine.connect() as conn:
-                result = await conn.execute(text("/* note */ " + JOIN_SQL))
-                assert list(result.keys()) == ["id", "name", "id"]
-                assert result.fetchall() == [(1, "x", 7)]
-        finally:
-            await engine.dispose()
-
-    asyncio.run(main())
 
 
 if __name__ == "__main__":

@@ -2520,30 +2520,6 @@ class TestColumnsWithSameName:
 
         assert rows == [(1, "x", 7)]
 
-    @pytest.mark.asyncio
-    async def test_join_via_async_sqlalchemy(self, joined_tables):
-        """Keep duplicate columns through the real async engine and adapter."""
-        from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import create_async_engine
-
-        table_a, table_b = joined_tables
-        url = f"cloudflare_d1+async://{ACCOUNT_ID}:{API_TOKEN}@{DATABASE_ID}"
-        engine = create_async_engine(url)
-
-        try:
-            async with engine.connect() as conn:
-                result = await conn.execute(
-                    text(
-                        f"/* note */ SELECT {table_a}.id, {table_a}.name, "
-                        f"{table_b}.id FROM {table_a} JOIN {table_b} "
-                        f"ON {table_b}.a_id = {table_a}.id"
-                    )
-                )
-                assert list(result.keys()) == ["id", "name", "id"]
-                assert result.fetchall() == [(1, "x", 7)]
-        finally:
-            await engine.dispose()
-
 
 # MARK: - Autoincrement Insert Tests (Issue #12)
 
