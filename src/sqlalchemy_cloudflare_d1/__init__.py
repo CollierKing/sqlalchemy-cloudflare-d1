@@ -74,7 +74,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __all__ = [
     # Dialects
     "CloudflareD1Dialect",

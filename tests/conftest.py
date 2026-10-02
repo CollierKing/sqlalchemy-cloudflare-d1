@@ -2,9 +2,10 @@
 
 import os
 import shutil
+import signal
 import socket
 import subprocess
-import time
+import threading
 import uuid
 from contextlib import closing
 from pathlib import Path
@@ -72,7 +73,10 @@ def find_free_port() -> int:
 
 
 def pywrangler_dev_server(
-    project_dir: Path, timeout: int = 300, env: Optional[dict] = None
+    project_dir: Path,
+    timeout: int = 300,
+    env: Optional[dict] = None,
+    remote_bindings: bool = False,
 ) -> tuple[subprocess.Popen, int]:
     """Start a pywrangler dev server and return the process and port.
 
@@ -80,46 +84,61 @@ def pywrangler_dev_server(
         project_dir: Path to the project directory containing wrangler.jsonc
         timeout: Maximum time to wait for server startup (default 300s for CI)
         env: Extra environment variables for the server process
+        remote_bindings: Honor configured remote bindings instead of forcing local D1
 
     Returns:
         Tuple of (process, port)
     """
     port = find_free_port()
 
-    # Start the dev server with --local flag
-    # Note: --remote has issues with Python Workers on Cloudflare edge
+    command = ["uv", "run", "pywrangler", "dev", "--port", str(port)]
+    if not remote_bindings:
+        command.append("--local")
     process = subprocess.Popen(
-        ["uv", "run", "pywrangler", "dev", "--local", "--port", str(port)],
+        command,
         cwd=project_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         env={**os.environ, **(env or {})},
+        start_new_session=True,
     )
 
-    # Wait for server to be ready
-    start_time = time.time()
-    ready_message = "[wrangler:info] Ready on"
+    ready = threading.Event()
+    exited = threading.Event()
 
-    while time.time() - start_time < timeout:
-        if process.poll() is not None:
-            # Process exited
-            output = process.stdout.read() if process.stdout else ""
-            raise RuntimeError(f"pywrangler dev exited unexpectedly: {output}")
+    def drain_output():
+        # Keep draining after startup so a full pipe cannot stall the Worker.
+        if process.stdout:
+            for line in process.stdout:
+                # Local Explorer also announces localhost before bindings are ready.
+                if "[wrangler:info] Ready on" in line:
+                    ready.set()
+        exited.set()
 
-        line = process.stdout.readline() if process.stdout else ""
-        if ready_message in line:
+    threading.Thread(target=drain_output, daemon=True).start()
+    for _ in range(timeout * 10):
+        if ready.wait(0.1):
             return process, port
+        if exited.is_set():
+            stop_dev_server(process)
+            raise RuntimeError("pywrangler dev exited before the Worker was ready")
 
-        # Also check for alternative ready messages
-        if f"localhost:{port}" in line.lower() or "ready" in line.lower():
-            # Give it a moment to fully initialize
-            time.sleep(0.5)
-            return process, port
-
-    # Timeout reached
-    process.terminate()
+    stop_dev_server(process)
     raise TimeoutError(f"pywrangler dev did not start within {timeout} seconds")
+
+
+def stop_dev_server(process: subprocess.Popen) -> None:
+    """Stop only the process group created for this test server."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
 
 
 def get_worker_project_dir() -> Path:
@@ -147,7 +166,7 @@ def initialized_worker():
 
 
 @pytest.fixture(scope="session")
-def dev_server(initialized_worker):
+def dev_server(initialized_worker, request):
     """Session-scoped fixture that starts a single pywrangler dev server.
 
     The server is reused across all Worker tests and stopped after the session.
@@ -161,29 +180,13 @@ def dev_server(initialized_worker):
 
     process = None
     try:
-        process, port = pywrangler_dev_server(project_dir)
+        process, port = pywrangler_dev_server(
+            project_dir, remote_bindings=getattr(request, "param", False)
+        )
         yield port
     finally:
         if process is not None:
-            # Kill the entire process group to clean up workerd child processes
-            try:
-                # Try graceful termination first
-                process.terminate()
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                # Force kill if it doesn't terminate
-                process.kill()
-                process.wait()
-
-            # Also kill any orphaned workerd processes on this port
-            try:
-                subprocess.run(
-                    ["pkill", "-f", f"workerd.*{port}"],
-                    capture_output=True,
-                    timeout=5,
-                )
-            except Exception:
-                pass
+            stop_dev_server(process)
 
 
 @pytest.fixture(scope="session")
@@ -230,21 +233,7 @@ def hyperdrive_dev_server():
                 pass
 
         if process is not None:
-            try:
-                process.terminate()
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-
-            try:
-                subprocess.run(
-                    ["pkill", "-f", f"workerd.*{port}"],
-                    capture_output=True,
-                    timeout=5,
-                )
-            except Exception:
-                pass
+            stop_dev_server(process)
 
 
 @pytest.fixture
