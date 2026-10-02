@@ -295,7 +295,7 @@ class BaseCursorMixin:
     """
 
     # These attributes must be defined by subclasses
-    _result_data: Optional[List[Dict[str, Any]]]
+    _result_data: Optional[List[Any]]
     _description: Optional[List[tuple]]
     _rowcount: int
     _arraysize: int
@@ -340,6 +340,10 @@ class BaseCursorMixin:
 
         row_data = self._result_data[self._position]
         self._position += 1
+
+        # REST API rows are arrays in column order, Worker rows are dicts
+        if not isinstance(row_data, dict):
+            return tuple(row_data)
 
         if self._description:
             column_names = [desc[0] for desc in self._description]
@@ -571,13 +575,10 @@ class Connection:
                 columns = raw_results.get("columns", [])
                 rows = raw_results.get("rows", [])
 
-                # Convert rows from arrays to dicts using column names
-                results = []
-                for row in rows:
-                    results.append(dict(zip(columns, row)))
-
+                # Keep rows as arrays so columns with the same name keep
+                # their own values
                 return {
-                    "results": results,
+                    "results": rows,
                     "columns": columns,
                     "meta": query_result.get("meta", {}),
                     "success": query_result.get("success", True),
@@ -940,13 +941,10 @@ class AsyncConnection:
                 columns = raw_results.get("columns", [])
                 rows = raw_results.get("rows", [])
 
-                # Convert rows from arrays to dicts using column names
-                results = []
-                for row in rows:
-                    results.append(dict(zip(columns, row)))
-
+                # Keep rows as arrays so columns with the same name keep
+                # their own values
                 return {
-                    "results": results,
+                    "results": rows,
                     "columns": columns,
                     "meta": query_result.get("meta", {}),
                     "success": query_result.get("success", True),
