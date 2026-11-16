@@ -96,7 +96,7 @@ jobs:
 
       - name: Publish package distributions to PyPI
         # v1.14.2 - bundles twine 7.0.0, which understands Metadata-Version 2.5
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@v1.14.3
         with:
           packages-dir: dist/
           verbose: true
