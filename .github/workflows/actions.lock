@@ -15,7 +15,7 @@ workflows:
         - 'actions/setup-python@v5.6.0'
         - 'actions/upload-artifact@v4.6.2'
         - 'astral-sh/setup-uv@v3.2.4'
-        - 'ncipollo/release-action@v1.16.0'
+        - 'ncipollo/release-action@v1.21.0'
         - 'pypa/gh-action-pypi-publish@v1.14.2'
     '.github/workflows/semgrep.yml':
         - 'actions/cache@v5.1.0'
@@ -66,9 +66,9 @@ dependencies:
         commit: 'sha1-caf0cab7a618c569241d31dcd442f54681755d39'
         owner_id: 115962839
         repo_id: 846733598
-    'ncipollo/release-action@v1.16.0':
-        ref: 'v1.16.0'
-        commit: 'sha1-440c8c1cb0ed28b9f43e4d1d670870f059653174'
+    'ncipollo/release-action@v1.21.0':
+        ref: 'v1.21.0'
+        commit: 'sha1-339a81892b84b4eeb0f6e744e4574d79d0d9b8dd'
         owner_id: 5712756
         repo_id: 204020546
     'pre-commit/action@v3.0.1':
