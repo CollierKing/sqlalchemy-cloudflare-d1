@@ -7,14 +7,14 @@ workflows:
         - 'actions/checkout@v4.4.0'
         - 'actions/setup-python@v5.6.0'
         - 'actions/upload-artifact@v4.6.2'
-        - 'astral-sh/setup-uv@v3.2.4'
+        - 'astral-sh/setup-uv@v10.3.3'
         - 'pre-commit/action@v3.0.1'
     '.github/workflows/release.yml':
         - 'actions/checkout@v4.4.0'
         - 'actions/download-artifact@v4.3.0'
         - 'actions/setup-python@v5.6.0'
         - 'actions/upload-artifact@v4.6.2'
-        - 'astral-sh/setup-uv@v3.2.4'
+        - 'astral-sh/setup-uv@v10.3.3'
         - 'ncipollo/release-action@v1.16.0'
         - 'pypa/gh-action-pypi-publish@v1.14.2'
     '.github/workflows/semgrep.yml':
@@ -61,9 +61,9 @@ dependencies:
         commit: 'sha1-ea165f8d65b6e75b540449e92b4886f43607fa02'
         owner_id: 44036562
         repo_id: 192625955
-    'astral-sh/setup-uv@v3.2.4':
-        ref: 'v3.2.4'
-        commit: 'sha1-caf0cab7a618c569241d31dcd442f54681755d39'
+    'astral-sh/setup-uv@v10.3.3':
+        ref: 'v10.3.3'
+        commit: 'sha1-68559e99cc807c1eb7e9238fd43a15bba460eec2'
         owner_id: 115962839
         repo_id: 846733598
     'ncipollo/release-action@v1.16.0':
