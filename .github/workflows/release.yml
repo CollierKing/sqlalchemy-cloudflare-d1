@@ -125,7 +125,7 @@ jobs:
           path: dist/
 
       - name: Create Release
-        uses: ncipollo/release-action@v1.16.0
+        uses: ncipollo/release-action@v1.21.0
         id: create-release
         with:
           artifacts: "dist/*"
