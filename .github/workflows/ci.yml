@@ -28,7 +28,8 @@ jobs:
 
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 (ubuntu-latest) has no Python 3.9 builds.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +58,8 @@ jobs:
 
   test:
     name: test
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 (ubuntu-latest) has no Python 3.9 builds.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
